@@ -127,17 +127,17 @@ install_config_if_absent() {
 }
 
 if [[ "$INSTALL_CONFIGS" == "1" ]]; then
-    install_config_if_absent "$PROJECT_ROOT/deploy/nginx/sqms.conf" /etc/nginx/sites-available/sqms
-    if [[ ! -e /etc/nginx/sites-enabled/sqms && ! -L /etc/nginx/sites-enabled/sqms && -e /etc/nginx/sites-available/sqms ]]; then
-        ln -s /etc/nginx/sites-available/sqms /etc/nginx/sites-enabled/sqms
+    install_config_if_absent "$PROJECT_ROOT/deploy/nginx/antrian.conf" /etc/nginx/sites-available/antrian
+    if [[ ! -e /etc/nginx/sites-enabled/antrian && ! -L /etc/nginx/sites-enabled/antrian && -e /etc/nginx/sites-available/antrian ]]; then
+        ln -s /etc/nginx/sites-available/antrian /etc/nginx/sites-enabled/antrian
         log "Menambahkan symlink Nginx site."
         CONFIG_CHANGED=1
     else
         warn "Symlink Nginx site sudah ada atau source belum tersedia; dipertahankan."
     fi
-    install_config_if_absent "$PROJECT_ROOT/deploy/supervisor/sqms-worker.conf" /etc/supervisor/conf.d/sqms-worker.conf
-    install_config_if_absent "$PROJECT_ROOT/deploy/systemd/sqms-reverb.service" /etc/systemd/system/sqms-reverb.service
-    install_config_if_absent "$PROJECT_ROOT/deploy/scripts/backup-postgres.sh" /usr/local/sbin/sqms-backup-postgres 0750
+    install_config_if_absent "$PROJECT_ROOT/deploy/supervisor/antrian-worker.conf" /etc/supervisor/conf.d/antrian-worker.conf
+    install_config_if_absent "$PROJECT_ROOT/deploy/systemd/antrian-reverb.service" /etc/systemd/system/antrian-reverb.service
+    install_config_if_absent "$PROJECT_ROOT/deploy/scripts/backup-postgres.sh" /usr/local/sbin/antrian-backup-postgres 0750
 else
     log "Penambahan konfigurasi dilewati (--skip-configs)."
 fi
@@ -154,7 +154,7 @@ if [[ "$ENABLE_SERVICES" == "1" ]]; then
     elif ! service_exists "$PHP_FPM_SERVICE" && command -v systemctl >/dev/null 2>&1; then
         PHP_FPM_SERVICE="$(systemctl list-unit-files 'php*-fpm.service' --no-legend 2>/dev/null | awk 'NR == 1 {print $1}')"
     fi
-    SERVICES=(nginx redis-server postgresql sqms-reverb)
+    SERVICES=(nginx redis-server postgresql antrian-reverb)
     [[ -n "$PHP_FPM_SERVICE" ]] && SERVICES+=("$PHP_FPM_SERVICE")
     for service in "${SERVICES[@]}"; do
         if ! service_exists "$service"; then continue; fi
