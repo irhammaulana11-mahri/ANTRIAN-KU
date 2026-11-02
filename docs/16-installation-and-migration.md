@@ -10,7 +10,7 @@ Buat database PostgreSQL 16, lalu isi `.env`:
 DB_CONNECTION=pgsql
 DB_HOST=127.0.0.1
 DB_PORT=5432
-DB_DATABASE=sqms
+DB_DATABASE=antrian_db
 DB_USERNAME=sqms
 DB_PASSWORD=change-this-secret
 

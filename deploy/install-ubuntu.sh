@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # Idempotent installer: existing files, packages, services, and .env are preserved.
-APP_DIR="${APP_DIR:-/var/www/sqms}"
+APP_DIR="${APP_DIR:-/var/www/ANTRIAN-KU}"
 INSTALL_MISSING_PACKAGES="${INSTALL_MISSING_PACKAGES:-0}"
 INSTALL_CONFIGS="${INSTALL_CONFIGS:-1}"
 INSTALL_COMPOSER="${INSTALL_COMPOSER:-0}"
@@ -32,8 +32,8 @@ Options:
 HELP
 }
 
-log() { printf '[sqms-installer] %s\n' "$*"; }
-warn() { printf '[sqms-installer] WARNING: %s\n' "$*" >&2; }
+log() { printf '[antrian-ku-installer] %s\n' "$*"; }
+warn() { printf '[antrian-ku-installer] WARNING: %s\n' "$*" >&2; }
 
 for argument in "$@"; do
     case "$argument" in
@@ -148,8 +148,10 @@ service_active() { systemctl is-active --quiet "$1"; }
 if [[ "$CONFIG_CHANGED" == "1" ]] && command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload; fi
 
 if [[ "$ENABLE_SERVICES" == "1" ]]; then
-    PHP_FPM_SERVICE="${PHP_FPM_SERVICE:-}"
+    PHP_FPM_SERVICE="${PHP_FPM_SERVICE:-php8.5-fpm}"
     if [[ -z "$PHP_FPM_SERVICE" ]] && command -v systemctl >/dev/null 2>&1; then
+        PHP_FPM_SERVICE="$(systemctl list-unit-files 'php*-fpm.service' --no-legend 2>/dev/null | awk 'NR == 1 {print $1}')"
+    elif ! service_exists "$PHP_FPM_SERVICE" && command -v systemctl >/dev/null 2>&1; then
         PHP_FPM_SERVICE="$(systemctl list-unit-files 'php*-fpm.service' --no-legend 2>/dev/null | awk 'NR == 1 {print $1}')"
     fi
     SERVICES=(nginx redis-server postgresql sqms-reverb)

@@ -1,17 +1,17 @@
 [Unit]
-Description=SQMS Laravel Reverb WebSocket Server
+Description=ANTRIAN-KU Laravel Reverb WebSocket Server
 After=network.target redis-server.service
 
 [Service]
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/var/www/sqms/backend
-ExecStart=/usr/bin/php /var/www/sqms/backend/artisan reverb:start --host=0.0.0.0 --port=8080
+WorkingDirectory=/var/www/ANTRIAN-KU/backend
+ExecStart=/usr/bin/php8.5 /var/www/ANTRIAN-KU/backend/artisan reverb:start --host=0.0.0.0 --port=8080
 Restart=always
 RestartSec=5
-StandardOutput=append:/var/log/sqms-reverb.log
-StandardError=append:/var/log/sqms-reverb-error.log
+StandardOutput=append:/var/log/antrian-reverb.log
+StandardError=append:/var/log/antrian-reverb-error.log
 Environment=APP_ENV=production
 
 [Install]

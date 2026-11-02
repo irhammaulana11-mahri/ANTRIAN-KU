@@ -5,7 +5,7 @@ set -Eeuo pipefail
 : "${PGPORT:=5432}"
 : "${PGDATABASE:?PGDATABASE wajib diisi}"
 : "${PGUSER:?PGUSER wajib diisi}"
-: "${BACKUP_DIR:=/var/backups/sqms}"
+: "${BACKUP_DIR:=/var/backups/antrian-ku}"
 umask 077
 mkdir -p "$BACKUP_DIR"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"

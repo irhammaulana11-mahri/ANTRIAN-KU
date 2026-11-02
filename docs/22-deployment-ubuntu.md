@@ -1,6 +1,6 @@
 # Fase 7 — Deployment Ubuntu Server
 
-Panduan ini menargetkan Ubuntu 24.04 LTS, PHP 8.3, PostgreSQL, Redis, Nginx, Supervisor, dan Reverb. Perintah instalasi membutuhkan root dan belum dijalankan otomatis dari repository ini.
+Panduan ini menargetkan Ubuntu 24.04 LTS, PHP 8.5, PostgreSQL, Redis, Nginx, Supervisor, dan Reverb. Perintah instalasi membutuhkan root dan belum dijalankan otomatis dari repository ini.
 
 ## 1. Server kosong atau server existing
 
@@ -33,13 +33,13 @@ sudo apt update
 sudo apt install -y nginx redis-server supervisor postgresql postgresql-contrib git unzip curl ca-certificates
 sudo add-apt-repository ppa:ondrej/php
 sudo apt update
-sudo apt install -y php8.3-fpm php8.3-cli php8.3-pgsql php8.3-redis php8.3-mbstring php8.3-xml php8.3-curl php8.3-zip php8.3-bcmath
+sudo apt install -y php8.5-fpm php8.5-cli php8.5-pgsql php8.5-redis php8.5-mbstring php8.5-xml php8.5-curl php8.5-zip php8.5-bcmath
 ```
 
-Install Composer resmi, clone source ke `/var/www/sqms`, lalu jalankan Laravel dari `backend/`:
+Install Composer resmi, clone source ke `/var/www/ANTRIAN-KU`, lalu jalankan Laravel dari `backend/`:
 
 ```bash
-cd /var/www/sqms/backend
+cd /var/www/ANTRIAN-KU/backend
 composer install --no-dev --classmap-authoritative
 cp .env.example .env
 php artisan key:generate
@@ -49,10 +49,12 @@ php artisan key:generate
 
 ```bash
 sudo -u postgres createuser --pwprompt sqms
-sudo -u postgres createdb --owner=sqms sqms
+sudo -u postgres createdb --owner=sqms antrian_db
 ```
 
 Isi `.env` production dengan `APP_ENV=production`, `APP_DEBUG=false`, HTTPS `APP_URL`, password database kuat, `CACHE_STORE=redis`, `QUEUE_CONNECTION=redis`, `BROADCAST_CONNECTION=reverb`, dan secret Reverb acak. Jangan commit `.env`.
+
+> Catatan: nama database production adalah `antrian_db`, sedangkan contoh role PostgreSQL tetap `sqms` agar kompatibel dengan konfigurasi yang sudah ada. Jika role di server berbeda, sesuaikan `DB_USERNAME`, `PGUSER`, dan hak aksesnya secara konsisten.
 
 ```bash
 php artisan migrate --force
@@ -60,17 +62,17 @@ php artisan db:seed --force
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
-cd /var/www/sqms/frontend && npm ci && npm run build
+cd /var/www/ANTRIAN-KU/frontend && npm ci && npm run build
 ```
 
 ## 3. Nginx, PHP-FPM, Redis
 
-Salin `deploy/nginx/sqms.conf` ke `/etc/nginx/sites-available/sqms`, ganti `server_name`, aktifkan symlink, lalu:
+Salin `deploy/nginx/sqms.conf` ke `/etc/nginx/sites-available/sqms`, ganti `server_name antrian-ku.example.com` dengan domain/IP sebenarnya, aktifkan symlink, lalu:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/sqms /etc/nginx/sites-enabled/sqms
 sudo nginx -t
-sudo systemctl enable --now nginx php8.3-fpm redis-server
+sudo systemctl enable --now nginx php8.5-fpm redis-server
 ```
 
 Pasang `deploy/supervisor/sqms-worker.conf`, lalu:
@@ -102,29 +104,29 @@ sudo crontab -e
 Contoh cron harian:
 
 ```cron
-15 2 * * * PGDATABASE=sqms PGUSER=sqms PGPASSWORD='PASSWORD_DARI_SECRET_STORE' BACKUP_DIR=/var/backups/sqms /usr/local/sbin/sqms-backup-postgres >> /var/log/sqms-backup.log 2>&1
+15 2 * * * PGDATABASE=antrian_db PGUSER=sqms PGPASSWORD='PASSWORD_DARI_SECRET_STORE' BACKUP_DIR=/var/backups/antrian-ku /usr/local/sbin/sqms-backup-postgres >> /var/log/antrian-ku-backup.log 2>&1
 ```
 
 Uji restore ke database terpisah:
 
 ```bash
-createdb sqms_restore_test
-pg_restore --clean --if-exists --dbname=sqms_restore_test /var/backups/sqms/FILE.dump
-dropdb sqms_restore_test
+createdb antrian_db_restore_test
+pg_restore --clean --if-exists --dbname=antrian_db_restore_test /var/backups/antrian-ku/FILE.dump
+dropdb antrian_db_restore_test
 ```
 
 ## 6. Verifikasi rilis
 
 ```bash
-cd /var/www/sqms/backend
+cd /var/www/ANTRIAN-KU/backend
 php artisan about
 php artisan migrate:status
-curl -f https://sqms.example.com/up
-curl -I https://sqms.example.com
-sudo systemctl is-active nginx php8.3-fpm redis-server sqms-reverb
+curl -f https://antrian-ku.example.com/up
+curl -I https://antrian-ku.example.com
+sudo systemctl is-active nginx php8.5-fpm redis-server sqms-reverb
 sudo supervisorctl status
 vendor/bin/phpunit
-cd /var/www/sqms/frontend && npm run lint && npm run test && npm run build
+cd /var/www/ANTRIAN-KU/frontend && npm run lint && npm run test && npm run build
 ```
 
 Deployment hanya boleh disebut berhasil bila pemeriksaan tersebut berhasil pada server target, login API berhasil, migrasi berjalan, queue worker memproses job, backup dapat direstore, dan Reverb tersambung dari browser. Pada repository ini saya hanya memvalidasi aplikasi lokal; saya tidak menyatakan deployment Ubuntu berhasil karena tidak memiliki akses ke server target.
