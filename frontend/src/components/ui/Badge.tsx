@@ -1,0 +1,2 @@
+import { cn } from '@/lib/utils'
+export function Badge({ children, tone = 'slate' }: { children: string; tone?: 'slate' | 'green' | 'amber' | 'blue' | 'red' }) { return <span className={cn('inline-flex rounded-full px-2.5 py-1 text-xs font-semibold', { 'bg-slate-100 text-slate-600': tone === 'slate', 'bg-emerald-100 text-emerald-700': tone === 'green', 'bg-amber-100 text-amber-700': tone === 'amber', 'bg-blue-100 text-blue-700': tone === 'blue', 'bg-red-100 text-red-700': tone === 'red' })}>{children}</span> }

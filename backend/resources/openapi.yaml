@@ -1,0 +1,4400 @@
+# Dokumentasi API SQMS (OpenAPI 3.0). Diuji kesesuaiannya dengan rute oleh tests/Feature/OpenApiSpecTest.php.
+openapi: 3.0.3
+info:
+  title: SQMS — Smart Queue Management System API
+  version: 1.0.0
+  description: 'API backend SQMS (Laravel, PostgreSQL). Semua endpoint berprefiks `/api/v1` kecuali `/broadcasting/auth`.
+
+
+    **Autentikasi:** `Authorization: Bearer <token>` (Sanctum). Petugas/admin memperoleh token dari `/auth/login`; perangkat display dari `/display/activate`.
+    Endpoint publik (katalog, pendaftaran, pelacakan) tidak memerlukan token.
+
+
+    **Isolasi cabang:** setiap data operasional memiliki `branch_id`. Pengguna cabang hanya dapat mengakses cabangnya; Super Admin mengirim `branch_id`
+    untuk endpoint per-cabang. Pembatasan dilakukan di backend (middleware, policy, query scope), bukan di frontend.
+
+
+    **Format:** respons sukses `{ "data": ..., "message": "..." }`; daftar memakai pagination Laravel (`data`, `links`, `meta`). Galat: `{ "message":
+    "..." }` atau `{ "message", "errors": { field: [pesan] } }` (422).
+
+
+    **Masa berlaku token:** staf 12 jam (dapat diperpanjang lewat `/auth/refresh`), perangkat 7 hari.
+
+
+    **Rate limit:** umum 120/menit; login 5/menit per email+IP; pendaftaran antrian 20/menit per IP; aktivasi display 10/menit per IP.
+
+
+    **Real-time:** lihat operasi `POST /broadcasting/auth` (Reverb/Echo).'
+servers:
+- url: /api/v1
+  description: Server saat ini
+security:
+- bearerAuth: []
+tags:
+- name: Auth
+- name: Katalog Publik
+- name: Antrian Publik
+- name: Kiosk
+- name: Antrian Staf
+- name: Distribusi
+- name: Ruang Kerja Petugas
+- name: Cabang
+- name: Petugas
+- name: Loket
+- name: Layanan
+- name: Central Display
+- name: Pengaturan
+- name: Laporan
+- name: Realtime
+paths:
+  /auth/login:
+    post:
+      tags:
+      - Auth
+      summary: Login petugas/admin
+      operationId: login
+      description: 'Mengembalikan token Sanctum untuk header `Authorization: Bearer` beserta `expires_at` (default 12 jam, `SANCTUM_STAFF_TOKEN_MINUTES`).
+        Akun petugas yang nonaktif/dihapus ditolak (403). Dibatasi 5 percobaan per menit per email+IP. Login berhasil, gagal, dan diblokir dicatat
+        di audit log (tanpa menyimpan password).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginInput'
+      responses:
+        '200':
+          description: Login berhasil.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/LoginResult'
+                  message:
+                    type: string
+        '401':
+          description: Email atau password salah.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security: []
+  /auth/me:
+    get:
+      tags:
+      - Auth
+      summary: Profil pengguna saat ini
+      operationId: me
+      description: Berisi role, daftar permission, dan cabang. Dipakai frontend untuk menu & route guard.
+      responses:
+        '200':
+          description: Profil.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /auth/refresh:
+    post:
+      tags:
+      - Auth
+      summary: Perpanjang token staf
+      operationId: refreshToken
+      description: Menukar token yang masih berlaku dengan token baru (masa berlaku dihitung ulang) dan mencabut token lama. Frontend memanggilnya
+        otomatis selama tab terbuka. Token yang sudah kedaluwarsa tidak dapat diperpanjang (401); token perangkat ditolak (403).
+      responses:
+        '200':
+          description: Token baru.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TokenRefresh'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /auth/logout:
+    post:
+      tags:
+      - Auth
+      summary: Logout
+      operationId: logout
+      description: Menghapus token yang sedang dipakai.
+      responses:
+        '200':
+          description: Logout berhasil.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+  /catalog/branches:
+    get:
+      tags:
+      - Katalog Publik
+      summary: Daftar cabang aktif + status pendaftaran
+      operationId: catalogBranches
+      description: 'Publik. Setiap cabang menyertakan `availability`: buka/tutup, jam operasional, sisa kuota online hari ini.'
+      responses:
+        '200':
+          description: Daftar cabang.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PublicBranch'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security: []
+  /catalog/service-types:
+    get:
+      tags:
+      - Katalog Publik
+      summary: Layanan aktif suatu cabang
+      operationId: catalogServiceTypes
+      parameters:
+      - name: branch_id
+        in: query
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Daftar layanan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceType'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security: []
+  /queues/online:
+    post:
+      tags:
+      - Antrian Publik
+      summary: Pendaftaran online
+      operationId: registerOnline
+      description: 'Nomor urut dibuat dengan transaksi + `SELECT FOR UPDATE` pada `queue_sequences` (per cabang, layanan, tanggal operasional)
+        sehingga aman dari duplikasi walau banyak pendaftar bersamaan. Token pelacakan **hanya ditampilkan sekali**. Dibatasi 20 permintaan/menit
+        per IP.
+
+
+        Ditolak (422) bila cabang libur/tutup/di luar jam operasional, kuota online harian penuh, antrian menunggu melewati ambang, atau nomor
+        telepon yang sama sudah punya antrian aktif untuk layanan itu. Prioritas hanya boleh diklaim oleh staf berwenang (`queues.assign`).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationInput'
+      responses:
+        '201':
+          description: Antrian dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RegistrationResult'
+                  message:
+                    type: string
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security: []
+  /queues/walk-in:
+    post:
+      tags:
+      - Antrian Staf
+      summary: Pendaftaran walk-in oleh staf
+      operationId: registerWalkIn
+      description: 'Nomor urut dibuat dengan transaksi + `SELECT FOR UPDATE` pada `queue_sequences` (per cabang, layanan, tanggal operasional)
+        sehingga aman dari duplikasi walau banyak pendaftar bersamaan. Token pelacakan **hanya ditampilkan sekali**. Dibatasi 20 permintaan/menit
+        per IP.
+
+
+        **Wajib login.** Dahulu publik; sekarang dikunci agar jam operasional dan kuota online tidak dapat dilewati dari luar. Untuk tablet di
+        kantor gunakan `POST /kiosk/queues`. Cabang harus milik pemanggil (Super Admin bebas). Tidak dibatasi jam operasional/kuota online. Kategori
+        prioritas hanya diterima bila pemanggil punya `queues.assign`.
+
+
+        **Izin:** ``queues.register` atau `queues.assign``.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationInput'
+      responses:
+        '201':
+          description: Antrian dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RegistrationResult'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /kiosk/config:
+    get:
+      tags:
+      - Kiosk
+      summary: Konfigurasi kiosk
+      operationId: kioskConfig
+      description: Hanya token perangkat bertipe KIOSK. Layanan aktif cabang perangkat dan status operasional.
+      responses:
+        '200':
+          description: Konfigurasi.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/KioskConfig'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security:
+      - kioskAuth: []
+  /kiosk/queues:
+    post:
+      tags:
+      - Kiosk
+      summary: Ambil nomor antrian dari kiosk
+      operationId: kioskIssueTicket
+      description: Cabang selalu diambil dari perangkat; `branch_id` dan `priority_type_id` pada input diabaikan (customer tidak dapat mengklaim
+        prioritas). Layanan dari cabang lain ditolak 422. Dibatasi 30 permintaan/menit per perangkat. Token pelacakan hanya tampil sekali (untuk
+        QR/tautan pada tiket).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KioskQueueInput'
+      responses:
+        '201':
+          description: Tiket dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/KioskTicket'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security:
+      - kioskAuth: []
+  /queues/track/{token}:
+    get:
+      tags:
+      - Antrian Publik
+      summary: Lacak antrian dengan token
+      operationId: trackQueue
+      description: Posisi dihitung memakai skor prioritas+aging yang sama dengan mesin distribusi. `estimated_wait_seconds` bernilai `null` bila
+        belum ada petugas aktif.
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 32
+      responses:
+        '200':
+          description: Status antrian.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueTracking'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security: []
+  /queues/cancel-by-token:
+    post:
+      tags:
+      - Antrian Publik
+      summary: Batalkan antrian dengan token
+      operationId: cancelByToken
+      description: Hanya untuk status WAITING/ASSIGNED/CALLED. Membebaskan petugas dan kuota online.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenCancelInput'
+      responses:
+        '200':
+          description: Antrian dibatalkan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueTracking'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security: []
+  /queues/history:
+    get:
+      tags:
+      - Antrian Staf
+      summary: Riwayat/monitoring antrian
+      operationId: queueHistory
+      description: 'CS/Teller hanya melihat antrian layanan yang menjadi kompetensinya; supervisor/admin melihat seluruh cabangnya.
+
+
+        **Izin:** `queues.view`.'
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/BranchIdQuery'
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/QueueStatus'
+      - name: queue_date
+        in: query
+        schema:
+          type: string
+          format: date
+      responses:
+        '200':
+          description: Daftar berhalaman.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Queue'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /queues/{queue}/cancel:
+    post:
+      tags:
+      - Antrian Staf
+      summary: Batalkan antrian (staf)
+      operationId: cancelQueue
+      description: '**Izin:** `queues.cancel`.'
+      parameters:
+      - name: queue
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Dibatalkan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Queue'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /queues/{queue}/verify-priority:
+    post:
+      tags:
+      - Antrian Staf
+      summary: Verifikasi prioritas
+      operationId: verifyPriority
+      description: 'Mencatat siapa yang memverifikasi prioritas (audit).
+
+
+        **Izin:** `queues.assign`.'
+      parameters:
+      - name: queue
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriorityVerifyInput'
+      responses:
+        '200':
+          description: Prioritas diverifikasi.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Queue'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /queues/{queue}/transfer:
+    post:
+      tags:
+      - Antrian Staf
+      summary: Pindahkan antrian ke layanan lain
+      operationId: transferQueue
+      description: 'Antrian mendapat nomor baru di layanan tujuan dan kembali WAITING. Bila sedang dilayani, sesi layanan ditutup dengan outcome
+        `TRANSFERRED`. Setelah transfer, distribusi otomatis langsung dijalankan sehingga antrian dan petugas yang dibebaskan segera mendapat
+        pasangan.
+
+
+        **Izin:** `queues.transfer`.'
+      parameters:
+      - name: queue
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferInput'
+      responses:
+        '200':
+          description: Dipindahkan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Queue'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /queues/{queue}/status:
+    patch:
+      tags:
+      - Antrian Staf
+      summary: Ubah status antrian (generik)
+      operationId: changeQueueStatus
+      description: 'Transisi divalidasi ketat: WAITING→CANCELLED; ASSIGNED→CALLED/WAITING/CANCELLED/SKIPPED/NO_SHOW; CALLED→SERVING/CALLED(recall)/SKIPPED/CANCELLED;
+        SERVING→COMPLETED/SKIPPED/NO_SHOW. `ASSIGNED` hanya dibuat oleh mesin distribusi. Petugas non-supervisor hanya boleh memproses antrian
+        yang dialokasikan kepadanya. Untuk alur harian petugas gunakan `/service/{queue}/{action}`.
+
+
+        **Izin:** `sesuai status tujuan (`queues.call`, `queues.start`, `queues.complete`, `queues.skip`, `queues.cancel`, `queues.assign`)`.'
+      parameters:
+      - name: queue
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusInput'
+      responses:
+        '200':
+          description: Status diubah.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Queue'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /queues/{queue}/assign:
+    post:
+      tags:
+      - Distribusi
+      summary: Assignment manual oleh supervisor
+      operationId: manualAssign
+      description: 'Wajib menyertakan alasan (tercatat). Petugas harus berkompetensi, tersedia, dan loket bebas.
+
+
+        **Izin:** `queues.assign`.'
+      parameters:
+      - name: queue
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualAssignInput'
+      responses:
+        '201':
+          description: Assignment dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Assignment'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /supervisor/board:
+    get:
+      tags:
+      - Distribusi
+      summary: Papan supervisor
+      operationId: supervisorBoard
+      description: 'Satu permintaan untuk UI supervisor: antrian aktif hari ini (WAITING/ASSIGNED/CALLED/SERVING) beserta petugas & loket yang
+        menanganinya, status seluruh petugas aktif (termasuk `is_available`, layanan, loket, antrian aktif), loket aktif (`in_use_by`), layanan,
+        dan kategori prioritas. Dipakai untuk assign manual, transfer, dan verifikasi prioritas.
+
+
+        **Izin:** `queues.assign`.'
+      parameters:
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Papan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SupervisorBoard'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /distribution/next:
+    post:
+      tags:
+      - Distribusi
+      summary: Jalankan distribusi otomatis (Round Robin)
+      operationId: distributeNext
+      description: 'Meng-assign satu antrian WAITING (prioritas+aging) ke satu petugas AVAILABLE berkompetensi dengan loket bebas. Mengembalikan
+        `data: null` bila tidak ada kandidat.
+
+
+        **Izin:** `queues.assign`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DistributionInput'
+      responses:
+        '200':
+          description: Hasil distribusi.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    oneOf:
+                    - $ref: '#/components/schemas/Assignment'
+                    - type: 'null'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /employee/workspace:
+    get:
+      tags:
+      - Ruang Kerja Petugas
+      summary: Ringkasan ruang kerja petugas
+      operationId: workspace
+      description: 'Status petugas, antrian aktif (+ loket, waktu tunggu, durasi), antrian berikutnya.
+
+
+        **Izin:** `queues.view`.'
+      responses:
+        '200':
+          description: Workspace.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Workspace'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /employee/status:
+    post:
+      tags:
+      - Ruang Kerja Petugas
+      summary: Ubah status diri
+      operationId: setOwnStatus
+      description: 'Status `BUSY` hanya diatur sistem. Ditolak 409 bila petugas masih memiliki antrian aktif. Saat menjadi `AVAILABLE`, auto-assign
+        dijalankan.
+
+
+        **Izin:** `employees.status`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeStatusInput'
+      responses:
+        '200':
+          description: Status diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Workspace'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /employee/heartbeat:
+    post:
+      tags:
+      - Ruang Kerja Petugas
+      summary: Heartbeat
+      operationId: heartbeat
+      description: 'Memperbarui detak tanpa mengubah status (BREAK tetap BREAK). Frontend mengirim tiap 20 detik; heartbeat lebih tua dari `stale_heartbeat_seconds`
+        (default 90 dtk) membuat petugas tidak dipilih distribusi.
+
+
+        **Izin:** `employees.status`.'
+      responses:
+        '200':
+          description: Diterima.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Workspace'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /service/{queue}/{action}:
+    post:
+      tags:
+      - Ruang Kerja Petugas
+      summary: Aksi pelayanan
+      operationId: serviceAction
+      description: '`call` (ASSIGNED→CALLED), `recall` (CALLED), `start` (CALLED→SERVING), `complete` (SERVING→COMPLETED), `skip`, `no-show`.
+        Setelah complete/skip/no-show sistem langsung mencari antrian berikutnya. Antrian milik petugas lain ditolak 403; status tidak sesuai
+        409.
+
+
+        **Izin:** ``queues.call` / `queues.recall` / `queues.start` / `queues.complete` / `queues.skip``.'
+      parameters:
+      - name: queue
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      - name: action
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - call
+          - recall
+          - start
+          - complete
+          - skip
+          - no-show
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Aksi berhasil.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Workspace'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /employees/{employee}/status:
+    post:
+      tags:
+      - Petugas
+      summary: Ubah status petugas (supervisor)
+      operationId: setEmployeeStatus
+      description: 'CS/Teller hanya dapat mengubah status dirinya sendiri; supervisor (`queues.assign`) dapat mengubah petugas lain di cabangnya.
+
+
+        **Izin:** `employees.status`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeStatusInput'
+      responses:
+        '200':
+          description: Status diubah.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /employees/{employee}/heartbeat:
+    post:
+      tags:
+      - Petugas
+      summary: Heartbeat petugas
+      operationId: employeeHeartbeat
+      description: '**Izin:** `employees.status`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Diterima.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /branches:
+    get:
+      tags:
+      - Cabang
+      summary: Daftar cabang
+      operationId: listBranchs
+      description: 'Pencarian teks (`q`), filter status, sorting dengan whitelist kolom, dan pagination (maks 100/halaman). `deleted=1` menampilkan
+        data terhapus (untuk dipulihkan).
+
+
+        **Izin:** `branches.view`.'
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/IsActive'
+      - $ref: '#/components/parameters/Deleted'
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - branch_code
+          - branch_name
+          - is_active
+          - created_at
+      - $ref: '#/components/parameters/Direction'
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Daftar berhalaman.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Branch'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Cabang
+      summary: Tambah cabang
+      operationId: createBranch
+      description: 'Hanya Super Admin. Cabang baru otomatis mendapat `queue_settings` dan kategori prioritas NORMAL/PRIORITY/URGENT. Hapus cabang
+        ditolak bila masih punya petugas/loket/layanan/antrian aktif.
+
+
+        **Izin:** `branches.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BranchInput'
+      responses:
+        '201':
+          description: Dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Branch'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /branches/{branch}:
+    get:
+      tags:
+      - Cabang
+      summary: Detail cabang
+      operationId: showBranch
+      description: '**Izin:** `branches.view`.'
+      parameters:
+      - name: branch
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Branch'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - Cabang
+      summary: Ubah cabang
+      operationId: updateBranch
+      description: 'Pembaruan parsial didukung (mis. hanya `is_active`). Menonaktifkan data yang sedang dipakai ditolak 409.
+
+
+        **Izin:** `branches.manage`.'
+      parameters:
+      - name: branch
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BranchInput'
+      responses:
+        '200':
+          description: Diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Branch'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    patch:
+      tags:
+      - Cabang
+      summary: Ubah cabang (alias PUT)
+      operationId: patchBranch
+      description: 'Sama dengan PUT.
+
+
+        **Izin:** `branches.manage`.'
+      parameters:
+      - name: branch
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BranchInput'
+      responses:
+        '200':
+          description: Diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Branch'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags:
+      - Cabang
+      summary: Hapus cabang (soft delete)
+      operationId: deleteBranch
+      description: 'Soft delete: riwayat transaksi tetap ada dan kode tetap dicadangkan. Ditolak 409 bila data sedang dipakai antrian/pelayanan
+        aktif.
+
+
+        **Izin:** `branches.manage`.'
+      parameters:
+      - name: branch
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Terhapus.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /branches/{branch}/restore:
+    post:
+      tags:
+      - Cabang
+      summary: Pulihkan cabang
+      operationId: restoreBranch
+      description: "Memulihkan data yang dihapus. Ditolak 409 bila data tidak berstatus dihapus atau cabang induknya masih terhapus. \n\n**Izin:**\
+        \ `branches.manage`."
+      parameters:
+      - name: branch
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Dipulihkan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Branch'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /employees:
+    get:
+      tags:
+      - Petugas
+      summary: Daftar petugas
+      operationId: listEmployees
+      description: 'Pencarian teks (`q`), filter status, sorting dengan whitelist kolom, dan pagination (maks 100/halaman). `deleted=1` menampilkan
+        data terhapus (untuk dipulihkan).
+
+
+        **Izin:** `employees.view`.'
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/IsActive'
+      - $ref: '#/components/parameters/Deleted'
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - employee_code
+          - employee_name
+          - is_active
+          - created_at
+      - $ref: '#/components/parameters/Direction'
+      - $ref: '#/components/parameters/BranchIdQuery'
+      - name: role
+        in: query
+        schema:
+          type: string
+          enum:
+          - Customer Service
+          - Teller
+          - Supervisor
+          - Admin Cabang
+      responses:
+        '200':
+          description: Daftar berhalaman.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Employee'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Petugas
+      summary: Tambah petugas
+      operationId: createEmployee
+      description: 'Membuat petugas sekaligus akun login. Role `Admin Cabang` hanya dapat diberikan Super Admin (`users.manage`).
+
+
+        **Izin:** `employees.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeCreateInput'
+      responses:
+        '201':
+          description: Dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Employee'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /employees/{employee}:
+    get:
+      tags:
+      - Petugas
+      summary: Detail petugas
+      operationId: showEmployee
+      description: '**Izin:** `employees.view`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Employee'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - Petugas
+      summary: Ubah petugas
+      operationId: updateEmployee
+      description: 'Pembaruan parsial didukung (mis. hanya `is_active`). Menonaktifkan data yang sedang dipakai ditolak 409.
+
+
+        **Izin:** `employees.manage`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeUpdateInput'
+      responses:
+        '200':
+          description: Diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Employee'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    patch:
+      tags:
+      - Petugas
+      summary: Ubah petugas (alias PUT)
+      operationId: patchEmployee
+      description: 'Sama dengan PUT.
+
+
+        **Izin:** `employees.manage`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeUpdateInput'
+      responses:
+        '200':
+          description: Diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Employee'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags:
+      - Petugas
+      summary: Hapus petugas (soft delete)
+      operationId: deleteEmployee
+      description: 'Soft delete: riwayat transaksi tetap ada dan kode tetap dicadangkan. Ditolak 409 bila data sedang dipakai antrian/pelayanan
+        aktif.
+
+
+        **Izin:** `employees.manage`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Terhapus.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /employees/{employee}/restore:
+    post:
+      tags:
+      - Petugas
+      summary: Pulihkan petugas
+      operationId: restoreEmployee
+      description: 'Memulihkan data yang dihapus. Ditolak 409 bila data tidak berstatus dihapus atau cabang induknya masih terhapus. Layanan/loket
+        petugas tidak ikut dipulihkan.
+
+
+        **Izin:** `employees.manage`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Dipulihkan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Employee'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /counters:
+    get:
+      tags:
+      - Loket
+      summary: Daftar loket
+      operationId: listCounters
+      description: 'Pencarian teks (`q`), filter status, sorting dengan whitelist kolom, dan pagination (maks 100/halaman). `deleted=1` menampilkan
+        data terhapus (untuk dipulihkan).
+
+
+        **Izin:** `counters.view`.'
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/IsActive'
+      - $ref: '#/components/parameters/Deleted'
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - counter_code
+          - counter_name
+          - counter_type
+          - is_active
+          - created_at
+      - $ref: '#/components/parameters/Direction'
+      - $ref: '#/components/parameters/BranchIdQuery'
+      - name: counter_type
+        in: query
+        schema:
+          type: string
+          enum:
+          - CS
+          - TL
+      responses:
+        '200':
+          description: Daftar berhalaman.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Counter'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Loket
+      summary: Tambah loket
+      operationId: createCounter
+      description: '**Izin:** `counters.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CounterInput'
+      responses:
+        '201':
+          description: Dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Counter'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /counters/{counter}:
+    get:
+      tags:
+      - Loket
+      summary: Detail loket
+      operationId: showCounter
+      description: '**Izin:** `counters.view`.'
+      parameters:
+      - name: counter
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Counter'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - Loket
+      summary: Ubah loket
+      operationId: updateCounter
+      description: 'Pembaruan parsial didukung (mis. hanya `is_active`). Menonaktifkan data yang sedang dipakai ditolak 409.
+
+
+        **Izin:** `counters.manage`.'
+      parameters:
+      - name: counter
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CounterInput'
+      responses:
+        '200':
+          description: Diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Counter'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    patch:
+      tags:
+      - Loket
+      summary: Ubah loket (alias PUT)
+      operationId: patchCounter
+      description: 'Sama dengan PUT.
+
+
+        **Izin:** `counters.manage`.'
+      parameters:
+      - name: counter
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CounterInput'
+      responses:
+        '200':
+          description: Diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Counter'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags:
+      - Loket
+      summary: Hapus loket (soft delete)
+      operationId: deleteCounter
+      description: 'Soft delete: riwayat transaksi tetap ada dan kode tetap dicadangkan. Ditolak 409 bila data sedang dipakai antrian/pelayanan
+        aktif.
+
+
+        **Izin:** `counters.manage`.'
+      parameters:
+      - name: counter
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Terhapus.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /counters/{counter}/restore:
+    post:
+      tags:
+      - Loket
+      summary: Pulihkan loket
+      operationId: restoreCounter
+      description: 'Memulihkan data yang dihapus. Ditolak 409 bila data tidak berstatus dihapus atau cabang induknya masih terhapus. Hubungan
+        dengan petugas tidak ikut dipulihkan.
+
+
+        **Izin:** `counters.manage`.'
+      parameters:
+      - name: counter
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Dipulihkan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Counter'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /service-types:
+    get:
+      tags:
+      - Layanan
+      summary: Daftar layanan
+      operationId: listServiceTypes
+      description: 'Pencarian teks (`q`), filter status, sorting dengan whitelist kolom, dan pagination (maks 100/halaman). `deleted=1` menampilkan
+        data terhapus (untuk dipulihkan).
+
+
+        **Izin:** `services.view`.'
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/IsActive'
+      - $ref: '#/components/parameters/Deleted'
+      - name: sort
+        in: query
+        schema:
+          type: string
+          enum:
+          - service_code
+          - service_name
+          - queue_prefix
+          - is_active
+          - created_at
+      - $ref: '#/components/parameters/Direction'
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Daftar berhalaman.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceType'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Layanan
+      summary: Tambah layanan
+      operationId: createServiceType
+      description: '**Izin:** `services.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceTypeInput'
+      responses:
+        '201':
+          description: Dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServiceType'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /service-types/{service_type}:
+    get:
+      tags:
+      - Layanan
+      summary: Detail layanan
+      operationId: showServiceType
+      description: '**Izin:** `services.view`.'
+      parameters:
+      - name: service_type
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServiceType'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - Layanan
+      summary: Ubah layanan
+      operationId: updateServiceType
+      description: 'Pembaruan parsial didukung (mis. hanya `is_active`). Menonaktifkan data yang sedang dipakai ditolak 409.
+
+
+        **Izin:** `services.manage`.'
+      parameters:
+      - name: service_type
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceTypeInput'
+      responses:
+        '200':
+          description: Diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServiceType'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    patch:
+      tags:
+      - Layanan
+      summary: Ubah layanan (alias PUT)
+      operationId: patchServiceType
+      description: 'Sama dengan PUT.
+
+
+        **Izin:** `services.manage`.'
+      parameters:
+      - name: service_type
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceTypeInput'
+      responses:
+        '200':
+          description: Diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServiceType'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags:
+      - Layanan
+      summary: Hapus layanan (soft delete)
+      operationId: deleteServiceType
+      description: 'Soft delete: riwayat transaksi tetap ada dan kode tetap dicadangkan. Ditolak 409 bila data sedang dipakai antrian/pelayanan
+        aktif.
+
+
+        **Izin:** `services.manage`.'
+      parameters:
+      - name: service_type
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Terhapus.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /service-types/{service_type}/restore:
+    post:
+      tags:
+      - Layanan
+      summary: Pulihkan layanan
+      operationId: restoreServiceType
+      description: 'Memulihkan data yang dihapus. Ditolak 409 bila data tidak berstatus dihapus atau cabang induknya masih terhapus. Kompetensi
+        petugas tidak ikut dipulihkan.
+
+
+        **Izin:** `services.manage`.'
+      parameters:
+      - name: service_type
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Dipulihkan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServiceType'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /employees/{employee}/competencies:
+    put:
+      tags:
+      - Petugas
+      summary: Atur layanan (kompetensi) petugas
+      operationId: syncCompetencies
+      description: 'Mengganti seluruh daftar layanan. Semua layanan harus dari cabang petugas.
+
+
+        **Izin:** `employees.manage`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - service_type_ids
+              properties:
+                service_type_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Disimpan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Employee'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /employees/{employee}/counters:
+    put:
+      tags:
+      - Petugas
+      summary: Atur loket petugas
+      operationId: syncEmployeeCounters
+      description: 'Petugas tanpa layanan dan loket tidak pernah menerima antrian.
+
+
+        **Izin:** `employees.manage`.'
+      parameters:
+      - name: employee
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - counter_ids
+              properties:
+                counter_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Disimpan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Employee'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /priority-types:
+    get:
+      tags:
+      - Layanan
+      summary: Daftar kategori prioritas cabang
+      operationId: priorityTypes
+      description: 'Untuk petugas yang memverifikasi prioritas saat walk-in.
+
+
+        **Izin:** `queues.assign`.'
+      parameters:
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Daftar.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PriorityType'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /display/activate:
+    post:
+      tags:
+      - Central Display
+      summary: Aktivasi perangkat display
+      operationId: activateDisplay
+      description: 'Menukar kunci pairing (`{id}.{secret}`) dengan token Sanctum berlaku 7 hari. Ability token mengikuti tipe perangkat: `display`
+        (TV) atau `kiosk` (tablet); `device.device_type` pada respons memberitahu klien. Token lama perangkat itu dicabut. Dibatasi 10 percobaan/menit
+        per IP.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - credential
+              properties:
+                credential:
+                  type: string
+      responses:
+        '200':
+          description: Aktif.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplaySession'
+                  message:
+                    type: string
+        '401':
+          description: Kunci tidak valid atau perangkat dinonaktifkan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security: []
+  /display/refresh:
+    post:
+      tags:
+      - Central Display
+      summary: Perpanjang token perangkat
+      operationId: refreshDisplay
+      description: Untuk perangkat DISPLAY maupun KIOSK; tipe dan ability dipertahankan.
+      responses:
+        '200':
+          description: Token baru.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplaySession'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security:
+      - displayAuth: []
+      - kioskAuth: []
+  /display/snapshot:
+    get:
+      tags:
+      - Central Display
+      summary: Snapshot display cabang
+      operationId: displaySnapshot
+      description: 'Sumber kebenaran untuk display: panggilan hari ini, antrian menunggu, pengaturan suara/pengumuman. Digunakan saat start dan
+        setelah reconnect; snapshot tidak pernah memicu suara. Hanya data cabang milik perangkat.'
+      responses:
+        '200':
+          description: Snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplaySnapshot'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+      security:
+      - displayAuth: []
+  /display-devices:
+    get:
+      tags:
+      - Central Display
+      summary: Daftar perangkat display & kiosk
+      operationId: listDisplayDevices
+      description: '**Izin:** `displays.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Daftar berhalaman.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DisplayDevice'
+                  links:
+                    $ref: '#/components/schemas/PaginationLinks'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Central Display
+      summary: Daftarkan perangkat display/kiosk
+      operationId: createDisplayDevice
+      description: 'Tipe `DISPLAY` (default, TV baca-saja) atau `KIOSK` (tablet pengambilan nomor). Respons memuat `credential` (kunci pairing)
+        **sekali saja**; di database hanya disimpan hash-nya.
+
+
+        **Izin:** `displays.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - device_code
+              - device_name
+              properties:
+                branch_id:
+                  type: string
+                  format: uuid
+                device_code:
+                  type: string
+                  maxLength: 80
+                device_name:
+                  type: string
+                  maxLength: 150
+                device_type:
+                  type: string
+                  enum:
+                  - DISPLAY
+                  - KIOSK
+                  default: DISPLAY
+      responses:
+        '201':
+          description: Dibuat.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplayDevice'
+                  credential:
+                    type: string
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /display-devices/{device}/rotate:
+    post:
+      tags:
+      - Central Display
+      summary: Buat kunci pairing baru
+      operationId: rotateDisplayDevice
+      description: 'Mengaktifkan kembali perangkat dan mencabut semua token lamanya.
+
+
+        **Izin:** `displays.manage`.'
+      parameters:
+      - name: device
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Kunci baru.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplayDevice'
+                  credential:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /display-devices/{device}/revoke:
+    post:
+      tags:
+      - Central Display
+      summary: Nonaktifkan perangkat
+      operationId: revokeDisplayDevice
+      description: 'Perangkat langsung keluar (token dicabut).
+
+
+        **Izin:** `displays.manage`.'
+      parameters:
+      - name: device
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Dinonaktifkan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplayDevice'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /settings/queue:
+    get:
+      tags:
+      - Pengaturan
+      summary: Pengaturan antrian cabang
+      operationId: getQueueSettings
+      description: 'Jam operasional (Senin=1…Minggu=7), kuota online, ambang antrian menunggu, hari libur, dan status ketersediaan saat ini.
+
+
+        **Izin:** `settings.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Pengaturan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/QueueSettings'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    put:
+      tags:
+      - Pengaturan
+      summary: Simpan pengaturan antrian
+      operationId: updateQueueSettings
+      description: 'Cabang yang belum mengatur jam operasional dianggap buka. `online_daily_quota`/`max_waiting_threshold` kosong (`null`) = tanpa
+        batas.
+
+
+        **Izin:** `settings.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueueSettingsInput'
+      responses:
+        '200':
+          description: Disimpan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/QueueSettings'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /settings/holidays:
+    post:
+      tags:
+      - Pengaturan
+      summary: Tambah hari libur
+      operationId: addHoliday
+      description: 'Pendaftaran online ditutup pada tanggal ini.
+
+
+        **Izin:** `settings.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - holiday_date
+              - holiday_name
+              properties:
+                branch_id:
+                  type: string
+                  format: uuid
+                holiday_date:
+                  type: string
+                  format: date
+                  description: Hari ini atau setelahnya.
+                holiday_name:
+                  type: string
+                  maxLength: 150
+      responses:
+        '201':
+          description: Disimpan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/QueueSettings'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /settings/holidays/{holiday}:
+    delete:
+      tags:
+      - Pengaturan
+      summary: Hapus hari libur
+      operationId: removeHoliday
+      description: '**Izin:** `settings.manage`.'
+      parameters:
+      - name: holiday
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Dihapus.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/QueueSettings'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /settings/display:
+    get:
+      tags:
+      - Pengaturan
+      summary: Pengaturan display
+      operationId: getDisplaySettings
+      description: '**Izin:** `settings.manage` atau `displays.manage`.'
+      parameters:
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Pengaturan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplaySettings'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    put:
+      tags:
+      - Pengaturan
+      summary: Simpan pengaturan display
+      operationId: updateDisplaySettings
+      description: 'Termasuk daftar sumber video TV (`display_media`, maks. 5; validasi: URL http/https, link YouTube harus dikenali, STREAM tanpa
+        kredensial).
+
+
+        **Izin:** `settings.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisplaySettings'
+      responses:
+        '200':
+          description: Disimpan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplaySettings'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /reports/summary:
+    get:
+      tags:
+      - Laporan
+      summary: Ringkasan statistik
+      operationId: reportSummary
+      description: 'Dihitung dari data historis (`queues`, `queue_assignments`, `service_sessions`), bukan dari status terakhir saja.
+
+
+        **Izin:** `reports.view`.'
+      parameters:
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - today
+          - month
+          - custom
+          default: today
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Laporan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ReportSummary'
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /reports/export:
+    get:
+      tags:
+      - Laporan
+      summary: Ekspor laporan (CSV)
+      operationId: reportExport
+      description: 'CSV berpemisah titik koma.
+
+
+        **Izin:** `reports.view`.'
+      parameters:
+      - name: period
+        in: query
+        schema:
+          type: string
+          enum:
+          - today
+          - month
+          - custom
+          default: today
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Berkas CSV.
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /audit-logs:
+    get:
+      tags:
+      - Laporan
+      summary: Audit log
+      operationId: auditLogs
+      description: 'Dibatasi pada cabang pengguna.
+
+
+        **Izin:** `audit.view`.'
+      parameters:
+      - $ref: '#/components/parameters/BranchIdQuery'
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Daftar audit.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditLog'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /broadcasting/auth:
+    post:
+      summary: Otorisasi channel WebSocket privat
+      operationId: broadcastAuth
+      tags:
+      - Realtime
+      description: 'Dipakai Laravel Echo untuk `private-branch.{branchId}` dan `private-employee.{employeeId}`. Token staf hanya boleh masuk channel
+        cabangnya; token perangkat TV (DISPLAY) hanya channel cabang perangkat itu dan tidak dapat masuk channel petugas; token KIOSK ditolak.
+        Server Reverb juga memeriksa header `Origin` (lihat `REVERB_ALLOWED_ORIGINS`).
+
+
+        Event: `queue.created`, `queue.assigned`, `queue.called`, `queue.recalled`, `queue.started`, `queue.completed`, `queue.transferred`, `queue.status-changed`,
+        `employee.status-changed`, `display.updated`. Setiap event membawa `event_id` dan `occurred_at`; event dikirim hanya setelah transaksi
+        database commit.'
+      servers:
+      - url: /
+      security:
+      - bearerAuth: []
+      - displayAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - socket_id
+              - channel_name
+              properties:
+                socket_id:
+                  type: string
+                channel_name:
+                  type: string
+                  example: private-branch.00000000-0000-0000-0000-000000000000
+      responses:
+        '200':
+          description: Tanda tangan channel.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  auth:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token Sanctum dari `POST /auth/login` (staf/admin).
+    displayAuth:
+      type: http
+      scheme: bearer
+      description: Token perangkat TV dari `POST /display/activate` (ability `display`, berlaku 7 hari). Hanya untuk `/display/snapshot`, `/display/refresh`,
+        dan channel cabang perangkat itu.
+    kioskAuth:
+      type: http
+      scheme: bearer
+      description: Token perangkat kiosk dari `POST /display/activate` (ability `kiosk`, berlaku 7 hari). Hanya untuk `/kiosk/*` dan `/display/refresh`;
+        tidak dapat masuk channel real-time.
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+    PerPage:
+      name: per_page
+      in: query
+      description: Maksimum 100.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    Q:
+      name: q
+      in: query
+      description: Pencarian teks (tidak peka huruf besar/kecil; karakter wildcard diperlakukan sebagai teks).
+      schema:
+        type: string
+    IsActive:
+      name: is_active
+      in: query
+      schema:
+        type: boolean
+    Deleted:
+      name: deleted
+      in: query
+      description: '`1` = hanya data yang sudah dihapus (untuk dipulihkan).'
+      schema:
+        type: boolean
+    Direction:
+      name: direction
+      in: query
+      schema:
+        type: string
+        enum:
+        - asc
+        - desc
+        default: asc
+    BranchIdQuery:
+      name: branch_id
+      in: query
+      description: Wajib untuk Super Admin pada endpoint per-cabang. Pengguna cabang hanya boleh cabangnya sendiri (cabang lain ditolak).
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthenticated:
+      description: Token tidak ada/tidak valid/kedaluwarsa.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Tidak punya izin atau data milik cabang lain.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Data tidak ditemukan.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Konflik status/penggunaan (mis. loket sedang melayani, transisi status tidak diizinkan).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: Validasi gagal.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+    TooManyRequests:
+      description: Rate limit terlampaui.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+    ValidationError:
+      type: object
+      properties:
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+    PaginationLinks:
+      type: object
+      properties:
+        first:
+          type: string
+          nullable: true
+        last:
+          type: string
+          nullable: true
+        prev:
+          type: string
+          nullable: true
+        next:
+          type: string
+          nullable: true
+    PaginationMeta:
+      type: object
+      properties:
+        current_page:
+          type: integer
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+        from:
+          type: integer
+          nullable: true
+        to:
+          type: integer
+          nullable: true
+    QueueStatus:
+      type: string
+      enum:
+      - WAITING
+      - ASSIGNED
+      - CALLED
+      - SERVING
+      - COMPLETED
+      - SKIPPED
+      - CANCELLED
+      - NO_SHOW
+    EmployeeStatus:
+      type: string
+      enum:
+      - AVAILABLE
+      - BUSY
+      - BREAK
+      - OFFLINE
+      - CLOSED
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        branch:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: string
+              format: uuid
+            branch_code:
+              type: string
+            branch_name:
+              type: string
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        employee:
+          type: object
+          nullable: true
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+    LoginInput:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        device_name:
+          type: string
+          maxLength: 100
+      required:
+      - email
+      - password
+    LoginResult:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Kedaluwarsa token (ISO 8601).
+    TokenRefresh:
+      type: object
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    SupervisorBoard:
+      type: object
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          nullable: true
+        queues:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              queue_number:
+                type: string
+              customer_name:
+                type: string
+              service_type_id:
+                type: string
+                format: uuid
+              service_name:
+                type: string
+                nullable: true
+              priority:
+                type: object
+                nullable: true
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  code:
+                    type: string
+                  name:
+                    type: string
+              priority_verified:
+                type: boolean
+              status:
+                $ref: '#/components/schemas/QueueStatus'
+              registration_channel:
+                type: string
+              registered_at:
+                type: string
+                format: date-time
+                nullable: true
+              called_at:
+                type: string
+                format: date-time
+                nullable: true
+              employee:
+                type: object
+                nullable: true
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+              counter:
+                type: object
+                nullable: true
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  code:
+                    type: string
+                  name:
+                    type: string
+        employees:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              employee_code:
+                type: string
+              employee_name:
+                type: string
+              status:
+                $ref: '#/components/schemas/EmployeeStatus'
+              is_available:
+                type: boolean
+              service_type_ids:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+              counter_ids:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+              active_queue_number:
+                type: string
+                nullable: true
+        counters:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              counter_code:
+                type: string
+              counter_name:
+                type: string
+              counter_type:
+                type: string
+              in_use_by:
+                type: string
+                nullable: true
+                description: Nama petugas yang sedang memakai loket.
+        services:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              service_name:
+                type: string
+              queue_prefix:
+                type: string
+        priorities:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              priority_code:
+                type: string
+              priority_name:
+                type: string
+              weight:
+                type: integer
+    Branch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_code:
+          type: string
+        branch_name:
+          type: string
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+        employees_count:
+          type: integer
+        counters_count:
+          type: integer
+        service_types_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    BranchInput:
+      type: object
+      properties:
+        branch_code:
+          type: string
+          maxLength: 30
+          description: Huruf/angka/-/_; unik (termasuk cabang terhapus).
+        branch_name:
+          type: string
+          maxLength: 150
+        address:
+          type: string
+          maxLength: 500
+          nullable: true
+        phone:
+          type: string
+          maxLength: 40
+          nullable: true
+        is_active:
+          type: boolean
+      required:
+      - branch_code
+      - branch_name
+    PublicBranch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_code:
+          type: string
+        branch_name:
+          type: string
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        availability:
+          $ref: '#/components/schemas/Availability'
+    Availability:
+      type: object
+      properties:
+        is_open:
+          type: boolean
+        reason:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        opens_at:
+          type: string
+          nullable: true
+          example: 08:00
+        closes_at:
+          type: string
+          nullable: true
+          example: '16:00'
+        holiday_name:
+          type: string
+          nullable: true
+        online_available:
+          type: boolean
+        online_reason:
+          type: string
+          nullable: true
+          description: HOLIDAY, CLOSED_DAY, OUTSIDE_HOURS, QUOTA_FULL, atau WAITING_FULL.
+        online_message:
+          type: string
+          nullable: true
+        online_quota:
+          type: object
+          properties:
+            limit:
+              type: integer
+              nullable: true
+            used:
+              type: integer
+            remaining:
+              type: integer
+              nullable: true
+        waiting_count:
+          type: integer
+    Employee:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+          nullable: true
+        employee_code:
+          type: string
+        employee_name:
+          type: string
+        is_active:
+          type: boolean
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            email:
+              type: string
+            roles:
+              type: array
+              items:
+                type: string
+        service_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceType'
+        counters:
+          type: array
+          items:
+            $ref: '#/components/schemas/Counter'
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    EmployeeCreateInput:
+      type: object
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+          description: Wajib untuk Super Admin; diabaikan/dibatasi untuk pengguna cabang.
+        employee_code:
+          type: string
+          maxLength: 40
+        employee_name:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 12
+          maxLength: 100
+        role_name:
+          type: string
+          enum:
+          - Customer Service
+          - Teller
+          - Supervisor
+          - Admin Cabang
+        user_id:
+          type: string
+          format: uuid
+          description: 'Alternatif: hubungkan akun yang sudah ada di cabang yang sama.'
+        is_active:
+          type: boolean
+      required:
+      - employee_code
+      - employee_name
+    EmployeeUpdateInput:
+      type: object
+      properties:
+        employee_code:
+          type: string
+          maxLength: 40
+        employee_name:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 12
+          description: Opsional. Mengganti password mengakhiri semua sesi login petugas.
+        role_name:
+          type: string
+          enum:
+          - Customer Service
+          - Teller
+          - Supervisor
+          - Admin Cabang
+        is_active:
+          type: boolean
+    Counter:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        counter_code:
+          type: string
+        counter_name:
+          type: string
+        counter_type:
+          type: string
+          enum:
+          - CS
+          - TL
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    CounterInput:
+      type: object
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        counter_code:
+          type: string
+          maxLength: 40
+        counter_name:
+          type: string
+          maxLength: 150
+        counter_type:
+          type: string
+          enum:
+          - CS
+          - TL
+          description: Menentukan area CS/Teller pada Central Display.
+        is_active:
+          type: boolean
+      required:
+      - counter_code
+      - counter_name
+      - counter_type
+    ServiceType:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        service_code:
+          type: string
+        service_name:
+          type: string
+        queue_prefix:
+          type: string
+        priority_enabled:
+          type: boolean
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    ServiceTypeInput:
+      type: object
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        service_code:
+          type: string
+          maxLength: 40
+        service_name:
+          type: string
+          maxLength: 150
+        queue_prefix:
+          type: string
+          maxLength: 10
+          pattern: ^[A-Z0-9]+$
+          description: Huruf kapital/angka; unik per cabang.
+        priority_enabled:
+          type: boolean
+        is_active:
+          type: boolean
+      required:
+      - service_code
+      - service_name
+      - queue_prefix
+    PriorityType:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        priority_code:
+          type: string
+        priority_name:
+          type: string
+        weight:
+          type: integer
+    Queue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        service_type_id:
+          type: string
+          format: uuid
+        service_name:
+          type: string
+        priority_type_id:
+          type: string
+          format: uuid
+          nullable: true
+        priority_name:
+          type: string
+          nullable: true
+        queue_date:
+          type: string
+          format: date
+        sequence_no:
+          type: integer
+        queue_number:
+          type: string
+          example: CS-001
+        customer_name:
+          type: string
+        customer_phone:
+          type: string
+          nullable: true
+          description: Hanya untuk pengguna dengan `queues.view`.
+        service_notes:
+          type: string
+          nullable: true
+        registration_channel:
+          type: string
+          enum:
+          - WALK_IN
+          - ONLINE
+        status:
+          $ref: '#/components/schemas/QueueStatus'
+        called_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+    RegistrationInput:
+      type: object
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        service_type_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+          maxLength: 150
+        customer_phone:
+          type: string
+          maxLength: 40
+          nullable: true
+        service_notes:
+          type: string
+          maxLength: 2000
+          nullable: true
+        priority_type_id:
+          type: string
+          format: uuid
+          description: Hanya diterima dari staf berwenang (`queues.assign`).
+      required:
+      - branch_id
+      - service_type_id
+      - customer_name
+    RegistrationResult:
+      type: object
+      properties:
+        queue:
+          $ref: '#/components/schemas/Queue'
+        token:
+          type: string
+          description: Token pelacakan 96 karakter; hanya tampil sekali.
+    QueueTracking:
+      type: object
+      properties:
+        queue_number:
+          type: string
+        branch_name:
+          type: string
+          nullable: true
+        service_name:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/QueueStatus'
+        queue_date:
+          type: string
+          format: date
+        customer_name:
+          type: string
+        registration_channel:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        called_at:
+          type: string
+          format: date-time
+          nullable: true
+        position:
+          type: integer
+          nullable: true
+        ahead:
+          type: integer
+          nullable: true
+        estimated_wait_seconds:
+          type: integer
+          nullable: true
+        counter:
+          type: object
+          nullable: true
+          properties:
+            counter_code:
+              type: string
+            counter_name:
+              type: string
+        can_cancel:
+          type: boolean
+    TokenCancelInput:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 32
+          maxLength: 200
+        reason:
+          type: string
+          maxLength: 500
+      required:
+      - token
+    PriorityVerifyInput:
+      type: object
+      properties:
+        priority_type_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          maxLength: 500
+      required:
+      - priority_type_id
+    TransferInput:
+      type: object
+      properties:
+        target_service_type_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          maxLength: 500
+      required:
+      - target_service_type_id
+      - reason
+    StatusInput:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/QueueStatus'
+        reason:
+          type: string
+          maxLength: 500
+      required:
+      - status
+    ManualAssignInput:
+      type: object
+      properties:
+        employee_id:
+          type: string
+          format: uuid
+        counter_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          maxLength: 500
+      required:
+      - employee_id
+      - counter_id
+      - reason
+    DistributionInput:
+      type: object
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        service_type_id:
+          type: string
+          format: uuid
+      required:
+      - service_type_id
+    Assignment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        queue_id:
+          type: string
+          format: uuid
+        employee_id:
+          type: string
+          format: uuid
+        counter_id:
+          type: string
+          format: uuid
+        assignment_type:
+          type: string
+          enum:
+          - AUTO
+          - MANUAL
+          - TRANSFER
+        assigned_at:
+          type: string
+          format: date-time
+          nullable: true
+        queue:
+          $ref: '#/components/schemas/Queue'
+        employee:
+          $ref: '#/components/schemas/Employee'
+        counter:
+          $ref: '#/components/schemas/Counter'
+    EmployeeStatusInput:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - AVAILABLE
+          - BREAK
+          - OFFLINE
+          - CLOSED
+        reason:
+          type: string
+          maxLength: 500
+      required:
+      - status
+    Workspace:
+      type: object
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          nullable: true
+        employee:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            employee_code:
+              type: string
+            employee_name:
+              type: string
+            service_types:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  service_name:
+                    type: string
+                  queue_prefix:
+                    type: string
+            counters:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  counter_code:
+                    type: string
+                  counter_name:
+                    type: string
+        status:
+          $ref: '#/components/schemas/EmployeeStatus'
+        is_available:
+          type: boolean
+        heartbeat_at:
+          type: string
+          format: date-time
+          nullable: true
+        ready:
+          type: boolean
+          description: true bila petugas punya layanan dan loket.
+        active:
+          type: object
+          nullable: true
+          properties:
+            queue_id:
+              type: string
+              format: uuid
+            queue_number:
+              type: string
+            customer_name:
+              type: string
+            service_name:
+              type: string
+            service_notes:
+              type: string
+              nullable: true
+            priority_name:
+              type: string
+              nullable: true
+            status:
+              type: string
+              enum:
+              - ASSIGNED
+              - CALLED
+              - SERVING
+            counter:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                counter_code:
+                  type: string
+                counter_name:
+                  type: string
+            registered_at:
+              type: string
+              format: date-time
+              nullable: true
+            assigned_at:
+              type: string
+              format: date-time
+              nullable: true
+            called_at:
+              type: string
+              format: date-time
+              nullable: true
+            service_started_at:
+              type: string
+              format: date-time
+              nullable: true
+        waiting_count:
+          type: integer
+        next:
+          type: array
+          items:
+            type: object
+            properties:
+              queue_id:
+                type: string
+                format: uuid
+              queue_number:
+                type: string
+              customer_name:
+                type: string
+              service_name:
+                type: string
+    KioskQueueInput:
+      type: object
+      properties:
+        service_type_id:
+          type: string
+          format: uuid
+        customer_name:
+          type: string
+          minLength: 2
+          maxLength: 150
+        customer_phone:
+          type: string
+          maxLength: 40
+          nullable: true
+        service_notes:
+          type: string
+          maxLength: 2000
+          nullable: true
+      required:
+      - service_type_id
+      - customer_name
+    KioskConfig:
+      type: object
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          nullable: true
+        branch:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            branch_name:
+              type: string
+        services:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              service_name:
+                type: string
+              queue_prefix:
+                type: string
+        availability:
+          type: object
+          properties:
+            is_open:
+              type: boolean
+            message:
+              type: string
+              nullable: true
+            opens_at:
+              type: string
+              nullable: true
+            closes_at:
+              type: string
+              nullable: true
+            waiting_count:
+              type: integer
+    KioskTicket:
+      type: object
+      properties:
+        queue:
+          type: object
+          properties:
+            queue_number:
+              type: string
+            customer_name:
+              type: string
+            service_name:
+              type: string
+              nullable: true
+            created_at:
+              type: string
+              format: date-time
+              nullable: true
+            status:
+              $ref: '#/components/schemas/QueueStatus'
+        branch_name:
+          type: string
+          nullable: true
+        token:
+          type: string
+          description: Token pelacakan; hanya tampil sekali.
+        position:
+          type: integer
+          nullable: true
+        estimated_wait_seconds:
+          type: integer
+          nullable: true
+    DisplayDevice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        device_code:
+          type: string
+        device_name:
+          type: string
+        device_type:
+          type: string
+          enum:
+          - DISPLAY
+          - KIOSK
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_online:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+    DisplaySession:
+      type: object
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        device:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            device_name:
+              type: string
+            device_type:
+              type: string
+              enum:
+              - DISPLAY
+              - KIOSK
+        branch:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            branch_name:
+              type: string
+    DisplaySnapshot:
+      type: object
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          nullable: true
+        branch:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            branch_name:
+              type: string
+        settings:
+          type: object
+          properties:
+            announcement:
+              type: string
+              nullable: true
+            voice_rate:
+              type: number
+            voice_volume:
+              type: number
+            call_expiry_seconds:
+              type: integer
+              description: Panggilan lebih tua dari ini tidak boleh diucapkan.
+            media:
+              type: array
+              items:
+                $ref: '#/components/schemas/DisplayMediaSource'
+        calls:
+          type: array
+          items:
+            type: object
+            properties:
+              event_id:
+                type: string
+                format: uuid
+              queue_id:
+                type: string
+                format: uuid
+              call_type:
+                type: string
+                enum:
+                - INITIAL
+                - RECALL
+              called_at:
+                type: string
+                format: date-time
+                nullable: true
+              queue_number:
+                type: string
+              customer_name:
+                type: string
+              queue_status:
+                $ref: '#/components/schemas/QueueStatus'
+              service_name:
+                type: string
+              counter_code:
+                type: string
+              counter_name:
+                type: string
+              counter_type:
+                type: string
+        waiting:
+          type: array
+          items:
+            type: object
+            properties:
+              service_name:
+                type: string
+              total:
+                type: integer
+    DisplayMediaSource:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+          - STREAM
+          - YOUTUBE
+          description: STREAM = IPTV/URL video langsung (HLS .m3u8, MP4, WebM); YOUTUBE = video, siaran langsung, shorts, atau playlist.
+        label:
+          type: string
+          nullable: true
+          maxLength: 80
+          description: Nama tampilan (opsional).
+        url:
+          type: string
+          maxLength: 2000
+          description: 'http(s) saja. STREAM: tanpa username/password dan bukan link YouTube. YOUTUBE: domain YouTube resmi dengan id video/playlist
+            yang valid, atau kanal berformat /channel/UC… (diputar sebagai playlist semua unggahan). Link @nama ditolak.'
+        youtube_kind:
+          type: string
+          nullable: true
+          enum:
+          - video
+          - playlist
+          readOnly: true
+        youtube_id:
+          type: string
+          nullable: true
+          readOnly: true
+      required:
+      - type
+      - url
+    DisplaySettings:
+      type: object
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        display_announcement:
+          type: string
+          maxLength: 500
+          nullable: true
+        voice_rate:
+          type: number
+          minimum: 0.5
+          maximum: 2
+        voice_volume:
+          type: number
+          minimum: 0
+          maximum: 1
+        display_media:
+          type: array
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/DisplayMediaSource'
+          description: Sumber video TV berurutan (prioritas). Dikirim = menggantikan seluruh daftar; `[]` = hapus; tidak dikirim = tidak berubah.
+            Display memakai sumber pertama yang tersambung, pindah otomatis bila gagal, dan mencoba kembali sumber yang lebih prioritas secara
+            berkala. Video selalu tanpa suara.
+    QueueSettings:
+      type: object
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        online_daily_quota:
+          type: integer
+          nullable: true
+          minimum: 0
+        max_waiting_threshold:
+          type: integer
+          nullable: true
+          minimum: 0
+        operating_hours:
+          type: array
+          items:
+            type: object
+            properties:
+              weekday:
+                type: integer
+                minimum: 1
+                maximum: 7
+              configured:
+                type: boolean
+              is_closed:
+                type: boolean
+              opens_at:
+                type: string
+                example: 08:00
+              closes_at:
+                type: string
+                example: '16:00'
+        holidays:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              holiday_date:
+                type: string
+                format: date
+              holiday_name:
+                type: string
+        availability:
+          $ref: '#/components/schemas/Availability'
+    QueueSettingsInput:
+      type: object
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        online_daily_quota:
+          type: integer
+          nullable: true
+          minimum: 0
+        max_waiting_threshold:
+          type: integer
+          nullable: true
+          minimum: 0
+        operating_hours:
+          type: array
+          minItems: 7
+          maxItems: 7
+          description: Tepat 7 baris (weekday 1–7). Jam tutup harus setelah jam buka.
+          items:
+            type: object
+            properties:
+              weekday:
+                type: integer
+                minimum: 1
+                maximum: 7
+              is_closed:
+                type: boolean
+              opens_at:
+                type: string
+                example: 08:00
+              closes_at:
+                type: string
+                example: '16:00'
+            required:
+            - weekday
+            - is_closed
+    ReportSummary:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date-time
+              nullable: true
+            to:
+              type: string
+              format: date-time
+              nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        total_queues:
+          type: integer
+        served_customers:
+          type: integer
+        waiting_customers:
+          type: integer
+        cancelled_customers:
+          type: integer
+        average_wait_seconds:
+          type: number
+          nullable: true
+        average_service_seconds:
+          type: number
+          nullable: true
+        by_service:
+          type: array
+          items:
+            type: object
+            properties:
+              service_name:
+                type: string
+              total:
+                type: integer
+              served:
+                type: integer
+        employee_productivity:
+          type: array
+          items:
+            type: object
+            properties:
+              employee_id:
+                type: string
+                format: uuid
+              employee_name:
+                type: string
+              served_count:
+                type: integer
+              average_service_seconds:
+                type: number
+                nullable: true
+        branch_comparison:
+          type: array
+          items:
+            type: object
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        actor_id:
+          type: string
+          format: uuid
+          nullable: true
+        action:
+          type: string
+          example: employee.updated
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+          nullable: true
+        before_data:
+          type: object
+          nullable: true
+        after_data:
+          type: object
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true

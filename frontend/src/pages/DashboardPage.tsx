@@ -1,0 +1,19 @@
+import { useQuery } from '@tanstack/react-query'
+import { Activity, CheckCircle2, Clock3, Users } from 'lucide-react'
+import { Card, CardHeader } from '@/components/ui/Card'
+import { PageHeader } from '@/components/PageHeader'
+import { StatCard } from '@/components/StatCard'
+import { EmptyState, ErrorState, Loading } from '@/components/Feedback'
+import { Badge } from '@/components/ui/Badge'
+import { getData } from '@/lib/api'
+import type { Paginated, Queue } from '@/types/api'
+import { formatDate } from '@/lib/utils'
+import { useAuth } from '@/context/AuthContext'
+
+export function DashboardPage() {
+  const { user } = useAuth(); const today = new Date().toLocaleDateString('en-CA'); const role = user?.roles?.[0] ?? 'Pengguna'
+  const query = useQuery({ queryKey: ['dashboard-queues', user?.branch_id, today], queryFn: () => getData<Queue[]>('/queues/history', { per_page: 500, queue_date: today, branch_id: user?.branch_id ?? undefined }), refetchInterval: 15000 })
+  if (query.isLoading) return <Loading />; if (query.isError) return <ErrorState message="Dashboard membutuhkan akses queue history dari API." />
+  const queues = (query.data?.data ?? []) as Queue[]; const waiting = queues.filter((q) => ['WAITING', 'ASSIGNED', 'CALLED'].includes(q.status)).length; const completed = queues.filter((q) => q.status === 'COMPLETED').length; const serving = queues.filter((q) => q.status === 'SERVING').length
+  return <><PageHeader title={role === 'Super Admin' ? 'Dashboard Super Admin' : role === 'Admin Cabang' ? 'Dashboard Admin Cabang' : 'Dashboard Operasional'} description={`Ringkasan antrian hari ini${user?.branch ? ` · ${user.branch.branch_name}` : ' · seluruh cabang'}.`} /><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="Total hari ini" value={queues.length} icon={<Activity size={20} />} /><StatCard label="Dalam antrean" value={waiting} icon={<Clock3 size={20} />} tone="amber" /><StatCard label="Sedang dilayani" value={serving} icon={<Users size={20} />} tone="blue" /><StatCard label="Selesai" value={completed} icon={<CheckCircle2 size={20} />} tone="teal" /></div><Card className="mt-6"><CardHeader title="Aktivitas terbaru" description="Polling otomatis setiap 15 detik." />{queues.length === 0 ? <EmptyState message="Belum ada aktivitas queue dari API." /> : <div className="divide-y divide-slate-100">{queues.slice(0, 8).map((queue) => <div key={queue.id} className="flex items-center justify-between gap-4 py-3"><div><p className="font-bold">{queue.queue_number} · {queue.customer_name}</p><p className="text-xs text-slate-500">{queue.service_name ?? 'Layanan'} · {formatDate(queue.created_at)}</p></div><Badge tone={queue.status === 'COMPLETED' ? 'green' : queue.status === 'CANCELLED' ? 'red' : 'amber'}>{queue.status}</Badge></div>)}</div>}</Card></>
+}

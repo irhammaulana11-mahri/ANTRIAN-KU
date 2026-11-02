@@ -1,0 +1,3 @@
+export function Loading({ label = 'Memuat data…' }: { label?: string }) { return <div className="flex min-h-32 items-center justify-center text-sm text-slate-500"><span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />{label}</div> }
+export function ErrorState({ message = 'Data tidak dapat dimuat.' }: { message?: string }) { return <div className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{message}</div> }
+export function EmptyState({ message = 'Belum ada data.' }: { message?: string }) { return <div className="py-10 text-center text-sm text-slate-500">{message}</div> }

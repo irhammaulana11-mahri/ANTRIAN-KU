@@ -1,0 +1,127 @@
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowDown, ArrowUp, Copy, KeyRound, Plus, Power, RefreshCcw, Trash2 } from 'lucide-react'
+import { api, errorMessage, fieldError } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
+import { PageHeader } from '@/components/PageHeader'
+import { Card, CardHeader } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Field, Input, Select } from '@/components/ui/Field'
+import { EmptyState, ErrorState, Loading } from '@/components/Feedback'
+import { can } from '@/lib/access'
+import { formatDate } from '@/lib/utils'
+import type { Branch } from '@/types/api'
+
+interface Device { id: string; branch_id: string; device_code: string; device_name: string; device_type: 'DISPLAY' | 'KIOSK'; last_seen_at: string | null; revoked_at: string | null; is_online: boolean }
+interface MediaRow { type: 'STREAM' | 'YOUTUBE'; label: string; url: string }
+interface DisplaySettings { display_announcement: string | null; voice_rate: number; voice_volume: number; media_volume: number; display_media?: { type: 'STREAM' | 'YOUTUBE'; label: string | null; url: string }[] }
+const MAX_MEDIA = 5
+
+export function DisplayDevicesPage() {
+  const { user } = useAuth()
+  const client = useQueryClient()
+  const isGlobal = user?.branch_id == null
+  const [branchId, setBranchId] = useState(user?.branch_id ?? '')
+  const [form, setForm] = useState({ device_code: '', device_name: '', device_type: 'DISPLAY' as 'DISPLAY' | 'KIOSK' })
+  const [credential, setCredential] = useState<{ value: string; device: string; type: 'DISPLAY' | 'KIOSK' } | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const branches = useQuery({ queryKey: ['branches-for-form'], enabled: isGlobal, queryFn: async () => (await api.get<{ data: Branch[] }>('/branches', { params: { per_page: 100 } })).data.data })
+  useEffect(() => { if (isGlobal && !branchId && branches.data?.length) setBranchId(branches.data[0].id) }, [isGlobal, branchId, branches.data])
+
+  const devices = useQuery({ queryKey: ['display-devices', branchId], enabled: Boolean(branchId), refetchInterval: 15000, queryFn: async () => (await api.get<{ data: Device[] }>('/display-devices', { params: { branch_id: branchId || undefined } })).data.data })
+  const create = useMutation({
+    mutationFn: async () => (await api.post<{ data: Device; credential: string }>('/display-devices', { ...form, branch_id: branchId })).data,
+    onSuccess: (result) => { setCredential({ value: result.credential, device: result.data.device_name, type: result.data.device_type }); setForm({ device_code: '', device_name: '', device_type: form.device_type }); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
+  })
+  const rotate = useMutation({
+    mutationFn: async (device: Device) => ({ device, result: (await api.post<{ credential: string }>(`/display-devices/${device.id}/rotate`)).data }),
+    onSuccess: ({ device, result }) => { setCredential({ value: result.credential, device: device.device_name, type: device.device_type }); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
+  })
+  const revoke = useMutation({ mutationFn: async (device: Device) => api.post(`/display-devices/${device.id}/revoke`), onSuccess: () => void client.invalidateQueries({ queryKey: ['display-devices'] }) })
+
+  const settings = useQuery({ queryKey: ['display-settings', branchId], enabled: Boolean(branchId) && can(user, 'settings.manage'), queryFn: async () => (await api.get<{ data: DisplaySettings }>('/settings/display', { params: { branch_id: branchId || undefined } })).data.data })
+  const [announcement, setAnnouncement] = useState('')
+  const [voice, setVoice] = useState({ voice_rate: 1, voice_volume: 1, media_volume: 0.35 })
+  const [media, setMedia] = useState<MediaRow[]>([])
+  useEffect(() => { if (settings.data) { setAnnouncement(settings.data.display_announcement ?? ''); setVoice({ voice_rate: settings.data.voice_rate, voice_volume: settings.data.voice_volume, media_volume: settings.data.media_volume ?? 0.35 }); setMedia((settings.data.display_media ?? []).map((item) => ({ type: item.type, label: item.label ?? '', url: item.url }))) } }, [settings.data])
+  const saveSettings = useMutation({ mutationFn: async () => api.put('/settings/display', { branch_id: branchId || undefined, display_announcement: announcement || null, ...voice, display_media: media.filter((row) => row.url.trim() !== '').map((row) => ({ type: row.type, label: row.label.trim() || null, url: row.url.trim() })) }), onSuccess: () => void client.invalidateQueries({ queryKey: ['display-settings'] }) })
+
+  const link = credential ? `${window.location.origin}/${credential.type === 'KIOSK' ? 'kiosk' : 'display'}#key=${credential.value}` : ''
+  const copy = async (text: string) => { await navigator.clipboard?.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 2000) }
+
+  return <>
+    <PageHeader title="Perangkat Display & Kiosk" description="Daftarkan TV Central Display dan tablet kiosk pengambilan nomor. Setiap perangkat memakai kunci pairing sendiri dan hanya dapat mengakses data cabangnya." action={isGlobal ? <Select className="w-64" value={branchId} onChange={(event) => setBranchId(event.target.value)}>{(branches.data ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_code} — {branch.branch_name}</option>)}</Select> : undefined} />
+
+    {credential && <div className="mb-6 rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-200">
+      <p className="flex items-center gap-2 font-bold text-amber-900"><KeyRound size={18} />Kunci pairing untuk &ldquo;{credential.device}&rdquo;</p>
+      <p className="mt-1 text-sm text-amber-800">Simpan sekarang — kunci ini tidak akan ditampilkan lagi. Buka tautan di bawah pada browser perangkat, atau masukkan kunci di layar aktivasi.</p>
+      <code className="mt-3 block break-all rounded-xl bg-white p-3 text-xs">{link}</code>
+      <div className="mt-3 flex gap-2"><Button variant="secondary" onClick={() => void copy(link)}><Copy size={15} className="mr-2" />{copied ? 'Tersalin' : 'Salin tautan'}</Button><Button variant="ghost" onClick={() => void copy(credential.value)}>Salin kunci saja</Button><Button variant="ghost" onClick={() => setCredential(null)}>Tutup</Button></div>
+    </div>}
+
+    <div className="grid gap-6 xl:grid-cols-[1.4fr_.6fr]">
+      <Card>
+        <CardHeader title="Daftar perangkat" description="Status online berdasarkan aktivitas terakhir (2 menit)." />
+        {devices.isLoading ? <Loading /> : devices.isError ? <ErrorState message={errorMessage(devices.error)} /> : (devices.data ?? []).length === 0 ? <EmptyState message="Belum ada perangkat display di cabang ini." /> :
+          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-3">Perangkat</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Terakhir aktif</th><th className="px-3 py-3" /></tr></thead>
+            <tbody className="divide-y divide-slate-100">{(devices.data ?? []).map((device) => <tr key={device.id}>
+              <td className="px-3 py-4"><p className="font-bold">{device.device_name}</p><p className="text-xs text-slate-500">{device.device_code} · {device.device_type === 'KIOSK' ? 'Kiosk antrian' : 'Central Display'}</p></td>
+              <td className="px-3 py-4">{device.revoked_at ? <Badge tone="red">Dinonaktifkan</Badge> : device.is_online ? <Badge tone="green">Online</Badge> : <Badge>Offline</Badge>}</td>
+              <td className="whitespace-nowrap px-3 py-4 text-slate-500">{formatDate(device.last_seen_at)}</td>
+              <td className="px-3 py-4"><div className="flex justify-end gap-2">
+                <Button variant="secondary" className="whitespace-nowrap px-3 py-1.5 text-xs" disabled={rotate.isPending} onClick={() => window.confirm(`Buat kunci baru untuk ${device.device_name}? Perangkat yang sedang tersambung akan keluar.`) && rotate.mutate(device)}><RefreshCcw size={14} className="mr-1.5" />{device.revoked_at ? 'Aktifkan ulang' : 'Kunci baru'}</Button>
+                {!device.revoked_at && <Button variant="ghost" className="whitespace-nowrap px-3 py-1.5 text-xs text-red-600 hover:bg-red-50" disabled={revoke.isPending} onClick={() => window.confirm(`Nonaktifkan ${device.device_name}?`) && revoke.mutate(device)}><Power size={14} className="mr-1.5" />Nonaktifkan</Button>}
+              </div></td></tr>)}</tbody></table></div>}
+        {(rotate.isError || revoke.isError) && <p className="mt-3 text-sm text-red-600">{errorMessage(rotate.error ?? revoke.error)}</p>}
+      </Card>
+
+      <div className="space-y-6">
+        <Card>
+          <CardHeader title="Tambah perangkat" />
+          <div className="space-y-4">
+            <Field label="Tipe perangkat"><Select value={form.device_type} onChange={(event) => setForm({ ...form, device_type: event.target.value as 'DISPLAY' | 'KIOSK' })}><option value="DISPLAY">Central Display (TV)</option><option value="KIOSK">Kiosk antrian (tablet)</option></Select></Field>
+            <Field label="Nama perangkat"><Input value={form.device_name} onChange={(event) => setForm({ ...form, device_name: event.target.value })} placeholder="TV Lobby / Kiosk Lobby" /></Field>
+            <Field label="Kode perangkat"><Input value={form.device_code} onChange={(event) => setForm({ ...form, device_code: event.target.value })} placeholder="TV-LOBBY-01" /></Field>
+            {create.isError && <p className="text-sm text-red-600">{errorMessage(create.error)}</p>}
+            <Button className="w-full" disabled={create.isPending || !branchId || !form.device_code || !form.device_name} onClick={() => create.mutate()}><Plus size={16} className="mr-2" />{create.isPending ? 'Membuat…' : 'Buat perangkat'}</Button>
+          </div>
+        </Card>
+
+        {can(user, 'settings.manage') && <Card>
+          <CardHeader title="Pengumuman &amp; suara" description="Berlaku untuk semua display cabang ini." />
+          <div className="space-y-4">
+            <Field label="Teks pengumuman (berjalan di bawah layar)"><textarea value={announcement} maxLength={500} onChange={(event) => setAnnouncement(event.target.value)} className="min-h-24 w-full rounded-xl border-0 bg-slate-50 px-3.5 py-2.5 text-sm ring-1 ring-slate-200 focus:bg-white focus:ring-2 focus:ring-brand" placeholder="Contoh: Kantor tutup pukul 15.00 WIB." /></Field>
+            <Field label={`Volume bawaan (${Math.round(voice.voice_volume * 100)}%)`}><input type="range" min={0} max={1} step={0.05} value={voice.voice_volume} onChange={(event) => setVoice({ ...voice, voice_volume: Number(event.target.value) })} className="w-full" /></Field>
+            <Field label={`Volume media saat idle (${Math.round(voice.media_volume * 100)}%)`}><input type="range" min={0} max={1} step={0.05} value={voice.media_volume} onChange={(event) => setVoice({ ...voice, media_volume: Number(event.target.value) })} className="w-full" /></Field>
+            <Field label={`Kecepatan bicara bawaan (${voice.voice_rate.toFixed(2)}x)`}><input type="range" min={0.5} max={1.5} step={0.05} value={voice.voice_rate} onChange={(event) => setVoice({ ...voice, voice_rate: Number(event.target.value) })} className="w-full" /></Field>
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-sm font-semibold text-slate-700">Video di layar TV (IPTV / YouTube)</p>
+              <p className="mt-1 text-xs text-slate-500">Urutan = prioritas. Media tetap berjalan ketika nomor antrean dipanggil. Atur volume media agar tetap nyaman bersama suara pengumuman. Link YouTube yang diterima: video, siaran langsung, playlist, atau kanal berformat <code>/channel/UC…</code> (memutar semua unggahan).</p>
+              <div className="mt-3 space-y-3">
+                {media.map((row, index) => <div key={index} className="rounded-xl bg-slate-50 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand text-xs font-bold text-white">{index + 1}</span>
+                    <Select aria-label={`Jenis sumber ${index + 1}`} value={row.type} onChange={(event) => setMedia(media.map((item, i) => (i === index ? { ...item, type: event.target.value as MediaRow['type'] } : item)))}><option value="STREAM">IPTV / URL stream</option><option value="YOUTUBE">YouTube</option></Select>
+                    <button type="button" aria-label={`Naikkan prioritas sumber ${index + 1}`} disabled={index === 0} onClick={() => setMedia(media.map((item, i, all) => (i === index - 1 ? all[index] : i === index ? all[index - 1] : item)))} className="rounded-lg p-1.5 text-slate-500 hover:bg-white disabled:opacity-30"><ArrowUp size={16} /></button>
+                    <button type="button" aria-label={`Turunkan prioritas sumber ${index + 1}`} disabled={index === media.length - 1} onClick={() => setMedia(media.map((item, i, all) => (i === index ? all[index + 1] : i === index + 1 ? all[index] : item)))} className="rounded-lg p-1.5 text-slate-500 hover:bg-white disabled:opacity-30"><ArrowDown size={16} /></button>
+                    <button type="button" aria-label={`Hapus sumber ${index + 1}`} onClick={() => setMedia(media.filter((_, i) => i !== index))} className="rounded-lg p-1.5 text-red-500 hover:bg-white"><Trash2 size={16} /></button>
+                  </div>
+                  <Input className="mt-2" aria-label={`Alamat sumber ${index + 1}`} value={row.url} onChange={(event) => setMedia(media.map((item, i) => (i === index ? { ...item, url: event.target.value } : item)))} placeholder={row.type === 'YOUTUBE' ? 'https://www.youtube.com/watch?v=… · /playlist?list=… · /channel/UC…' : 'http://192.168.1.10/iptv/channel1.m3u8'} />
+                  <Input className="mt-2" aria-label={`Nama sumber ${index + 1}`} value={row.label} maxLength={80} onChange={(event) => setMedia(media.map((item, i) => (i === index ? { ...item, label: event.target.value } : item)))} placeholder="Nama (opsional), mis. IPTV Lobi" />
+                  {fieldError(saveSettings.error, `display_media.${index}.url`) && <p role="alert" className="mt-2 text-xs text-red-600">{fieldError(saveSettings.error, `display_media.${index}.url`)}</p>}
+                </div>)}
+                {media.length === 0 && <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">Belum ada video. Layar TV hanya menampilkan informasi antrian.</p>}
+                <Button type="button" variant="secondary" className="w-full" disabled={media.length >= MAX_MEDIA} onClick={() => setMedia([...media, { type: media.length === 0 ? 'STREAM' : 'YOUTUBE', label: '', url: '' }])}><Plus size={15} className="mr-2" />Tambah sumber video{media.length >= MAX_MEDIA ? ` (maks. ${MAX_MEDIA})` : ''}</Button>
+              </div>
+            </div>
+            {saveSettings.isError && !media.some((_, index) => fieldError(saveSettings.error, `display_media.${index}.url`)) && <p className="text-sm text-red-600">{errorMessage(saveSettings.error)}</p>}
+            {saveSettings.isSuccess && <p className="text-sm text-emerald-600">Pengaturan disimpan.</p>}
+            <Button className="w-full" disabled={saveSettings.isPending || !branchId} onClick={() => saveSettings.mutate()}>{saveSettings.isPending ? 'Menyimpan…' : 'Simpan pengaturan'}</Button>
+          </div>
+        </Card>}
+      </div>
+    </div>
+  </>
+}

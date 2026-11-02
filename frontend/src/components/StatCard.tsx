@@ -1,0 +1,3 @@
+import type { ReactNode } from 'react'
+import { Card } from '@/components/ui/Card'
+export function StatCard({ label, value, icon, tone = 'teal' }: { label: string; value: string | number; icon: ReactNode; tone?: 'teal' | 'amber' | 'blue' | 'red' }) { return <Card className="relative overflow-hidden"><div className="flex items-start justify-between"><div><p className="text-sm text-slate-500">{label}</p><p className="mt-2 text-3xl font-black text-ink">{value}</p></div><div className={{ teal: 'bg-teal-50 text-brand', amber: 'bg-amber-50 text-amber-600', blue: 'bg-blue-50 text-blue-600', red: 'bg-red-50 text-red-600' }[tone] + ' rounded-xl p-3'}>{icon}</div></div></Card> }

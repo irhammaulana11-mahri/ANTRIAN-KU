@@ -1,0 +1,13 @@
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { getData } from '@/lib/api'
+import { PageHeader } from '@/components/PageHeader'
+import { Card, CardHeader } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Select } from '@/components/ui/Field'
+import { EmptyState, ErrorState, Loading } from '@/components/Feedback'
+import { formatDate } from '@/lib/utils'
+import type { Queue } from '@/types/api'
+
+function statusTone(status: Queue['status']) { return ['COMPLETED'].includes(status) ? 'green' : ['CANCELLED', 'NO_SHOW'].includes(status) ? 'red' : ['SERVING', 'CALLED'].includes(status) ? 'blue' : 'amber' as const }
+export function QueueMonitoringPage() { const [status, setStatus] = useState(''); const query = useQuery({ queryKey: ['queue-history', status], queryFn: () => getData<Queue[]>('/queues/history', { per_page: 100, status: status || undefined }), refetchInterval: 10000 }); return <><PageHeader title="Monitoring Antrian" description="Pantau antrean dari seluruh cabang yang diizinkan oleh akun Anda." /><Card><CardHeader title="Antrean operasional" action={<Select className="w-48" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Semua status</option>{['WAITING', 'ASSIGNED', 'CALLED', 'SERVING', 'COMPLETED', 'CANCELLED'].map((item) => <option key={item}>{item}</option>)}</Select>} />{query.isLoading ? <Loading /> : query.isError ? <ErrorState message="Monitoring tidak dapat mengambil data queue." /> : (query.data?.data ?? []).length === 0 ? <EmptyState message="Tidak ada queue sesuai filter API." /> : <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-3">Nomor</th><th className="px-3 py-3">Customer</th><th className="px-3 py-3">Layanan</th><th className="px-3 py-3">Pendaftaran</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Waktu</th></tr></thead><tbody className="divide-y divide-slate-100">{(query.data?.data ?? []).map((queue) => <tr key={queue.id}><td className="px-3 py-4 font-black text-brand">{queue.queue_number}</td><td className="px-3 py-4 font-semibold">{queue.customer_name}</td><td className="px-3 py-4 text-slate-600">{queue.service_name ?? queue.service_type_id}</td><td className="px-3 py-4 text-slate-600">{queue.registration_channel}</td><td className="px-3 py-4"><Badge tone={statusTone(queue.status)}>{queue.status}</Badge></td><td className="px-3 py-4 text-slate-500">{formatDate(queue.created_at)}</td></tr>)}</tbody></table></div>}</Card></> }
