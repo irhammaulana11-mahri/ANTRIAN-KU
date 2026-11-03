@@ -13,17 +13,15 @@ import { formatDateOnly } from '@/lib/utils'
 import type { Branch, BranchAvailability } from '@/types/api'
 
 interface HourRow { weekday: number; configured: boolean; is_closed: boolean; opens_at: string; closes_at: string }
-interface QueueSettings { online_daily_quota: number | null; max_waiting_threshold: number | null; operating_hours: HourRow[]; holidays: { id: string; holiday_date: string; holiday_name: string }[]; availability: BranchAvailability }
+interface QueueSettings { branch_serves_directly: boolean; operating_hours: HourRow[]; holidays: { id: string; holiday_date: string; holiday_name: string }[]; availability: BranchAvailability }
 const DAYS = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']
-const numberOrNull = (value: string) => (value.trim() === '' ? null : Number(value))
 
 export function QueueSettingsPage() {
   const { user } = useAuth()
   const client = useQueryClient()
   const isGlobal = user?.branch_id == null
   const [branchId, setBranchId] = useState(user?.branch_id ?? '')
-  const [quota, setQuota] = useState('')
-  const [threshold, setThreshold] = useState('')
+  const [servesDirectly, setServesDirectly] = useState(true)
   const [hours, setHours] = useState<HourRow[]>([])
   const [holiday, setHoliday] = useState({ holiday_date: '', holiday_name: '' })
 
@@ -33,15 +31,14 @@ export function QueueSettingsPage() {
   const settings = useQuery({ queryKey: ['queue-settings', branchId], enabled: Boolean(branchId), queryFn: async () => (await api.get<{ data: QueueSettings }>('/settings/queue', { params: { branch_id: branchId || undefined } })).data.data })
   useEffect(() => {
     if (!settings.data) return
-    setQuota(settings.data.online_daily_quota?.toString() ?? '')
-    setThreshold(settings.data.max_waiting_threshold?.toString() ?? '')
     setHours(settings.data.operating_hours)
+    setServesDirectly(settings.data.branch_serves_directly ?? true)
   }, [settings.data])
 
   const refresh = (data: QueueSettings) => client.setQueryData(['queue-settings', branchId], (previous: QueueSettings | undefined) => ({ ...(previous ?? data), ...data }))
   const save = useMutation({
     mutationFn: async () => (await api.put<{ data: QueueSettings }>('/settings/queue', {
-      branch_id: branchId || undefined, online_daily_quota: numberOrNull(quota), max_waiting_threshold: numberOrNull(threshold),
+      branch_id: branchId || undefined, branch_serves_directly: servesDirectly,
       operating_hours: hours.map(({ weekday, is_closed, opens_at, closes_at }) => ({ weekday, is_closed, opens_at, closes_at })),
     })).data.data,
     onSuccess: refresh,
@@ -59,15 +56,24 @@ export function QueueSettingsPage() {
   const availability = settings.data?.availability
 
   return <>
-    <PageHeader title="Pengaturan Antrian" description="Atur jam operasional, hari libur, dan batas pendaftaran online. Walk-in di kantor tidak dibatasi kuota online." action={isGlobal ? <Select className="w-64" value={branchId} onChange={(event) => setBranchId(event.target.value)}>{(branches.data ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_code} — {branch.branch_name}</option>)}</Select> : undefined} />
+    <PageHeader title="Pengaturan Antrian" description="Atur titik layanan, jam operasional, dan hari libur cabang. Pendaftaran antrian dilakukan di kantor atau cabang." action={isGlobal ? <Select className="w-64" value={branchId} onChange={(event) => setBranchId(event.target.value)}>{(branches.data ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_code} — {branch.branch_name}</option>)}</Select> : undefined} />
     {settings.isLoading || !branchId ? <Loading /> : settings.isError ? <ErrorState message={errorMessage(settings.error)} /> : <div className="grid gap-6 xl:grid-cols-[1.3fr_.7fr]">
       <div className="space-y-6">
-        {availability && <div className={`rounded-2xl p-4 text-sm ${availability.online_available ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
-          <b>Status pendaftaran online hari ini:</b> {availability.online_available ? 'Dibuka' : availability.online_message}
-          {availability.online_quota.remaining != null && <span> · sisa kuota {availability.online_quota.remaining}</span>} · {availability.waiting_count} antrian menunggu
+        {availability && <div className={`rounded-2xl p-4 text-sm ${availability.is_open ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
+          <b>Status cabang hari ini:</b> {availability.is_open ? 'Buka' : availability.message} · {availability.waiting_count} antrian menunggu
         </div>}
         <Card>
-          <CardHeader title="Jam operasional" description="Pendaftaran online hanya diterima pada jam buka (WIB). Hari yang belum diatur dianggap buka." />
+          <CardHeader title="Titik layanan" description="Tentukan apakah cabang ikut membuka layanan, atau seluruh layanan dijalankan oleh unit." />
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" className="mt-1" checked={servesDirectly} onChange={(event) => setServesDirectly(event.target.checked)} />
+            <span><b className="text-slate-800">Cabang membuka layanan langsung</b><span className="mt-1 block text-slate-500">{servesDirectly
+              ? 'Cabang punya antrian, loket, petugas, dan layar sendiri (tanpa unit) berdampingan dengan unit. Kolom unit boleh dikosongkan = milik cabang. Nomor urut cabang terpisah dari nomor tiap unit.'
+              : 'Semua pelayanan ada di unit. Loket, petugas, perangkat, dan pendaftaran wajib memilih unit. Layar cabang menjadi ringkasan semua unit.'}</span></span>
+          </label>
+          <p className="mt-3 text-xs text-slate-400">Nomor urut selalu terpisah per unit (atau cabang), sehingga tiap titik layanan mulai dari 001 setiap hari. Simpan dengan tombol di bawah.</p>
+        </Card>
+        <Card>
+          <CardHeader title="Jam operasional" description="Dipakai untuk status buka/tutup cabang pada layar kiosk dan petugas (WIB). Hari yang belum diatur dianggap buka." />
           <div className="space-y-2">{hours.map((row) => <div key={row.weekday} className="grid grid-cols-[5rem_1fr] items-center gap-3 sm:grid-cols-[6rem_auto_1fr_1fr]">
             <span className="font-semibold">{DAYS[row.weekday - 1]}</span>
             <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={row.is_closed} onChange={(event) => setRow(row.weekday, { is_closed: event.target.checked, configured: true })} />Tutup</label>
@@ -76,18 +82,14 @@ export function QueueSettingsPage() {
           </div>)}</div>
         </Card>
         <Card>
-          <CardHeader title="Batas pendaftaran online" description="Kosongkan untuk tanpa batas." />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Kuota online per hari"><Input type="number" min={0} value={quota} onChange={(event) => setQuota(event.target.value)} placeholder="Tanpa batas" /></Field>
-            <Field label="Maks. antrian menunggu (online ditutup bila terlampaui)"><Input type="number" min={0} value={threshold} onChange={(event) => setThreshold(event.target.value)} placeholder="Tanpa batas" /></Field>
-          </div>
+          <CardHeader title="Simpan pengaturan" description="Titik layanan dan jam operasional disimpan bersamaan." />
           {save.isError && <p className="mt-4 text-sm text-red-600">{errorMessage(save.error)}</p>}
           {save.isSuccess && <p className="mt-4 text-sm text-emerald-600">Pengaturan disimpan.</p>}
           <div className="mt-5 flex justify-end"><Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Menyimpan…' : 'Simpan pengaturan'}</Button></div>
         </Card>
       </div>
       <Card className="h-fit">
-        <CardHeader title="Hari libur" description="Pendaftaran online ditutup pada tanggal ini." />
+        <CardHeader title="Hari libur" description="Cabang ditandai libur pada tanggal ini." />
         <div className="space-y-3">
           <Field label="Tanggal"><Input type="date" value={holiday.holiday_date} min={new Date().toLocaleDateString('en-CA')} onChange={(event) => setHoliday({ ...holiday, holiday_date: event.target.value })} /></Field>
           <Field label="Keterangan"><Input value={holiday.holiday_name} maxLength={150} onChange={(event) => setHoliday({ ...holiday, holiday_name: event.target.value })} placeholder="Contoh: Cuti Bersama" /></Field>

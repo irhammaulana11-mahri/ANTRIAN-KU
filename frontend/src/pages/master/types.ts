@@ -7,7 +7,7 @@ export interface MasterRow { id: string; branch_id?: string | null; user_id?: st
 export interface Option { value: string; label: string; sublabel?: string }
 export interface Ctx { user: User | null; branches: Branch[]; isGlobal: boolean; branchName: (id?: string | null) => string }
 /** Ctx diperluas dengan daftar unit — dipakai di halaman yang perlu dropdown unit. */
-export interface CtxWithUnits extends Ctx { units: Unit[] }
+export interface CtxWithUnits extends Ctx { units: Unit[]; servesDirectly: boolean }
 
 export interface FieldDef {
   name: string

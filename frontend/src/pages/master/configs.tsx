@@ -21,9 +21,12 @@ const defaultBranch = (ctx: Ctx) => ({ branch_id: ctx.user?.branch_id ?? (ctx.br
 const unitField = (ctx: CtxWithUnits): FieldDef[] => {
   if (ctx.user?.unit_id != null || ctx.user?.roles?.includes('Admin Unit')) return []  // Admin Unit: sembunyikan
   if ((ctx.units?.length ?? 0) === 0) return []      // tidak ada unit: sembunyikan
-  const allowEmpty = ctx.user?.branch_id == null     // Super Admin boleh pilih "tidak terikat"
+  // Kosong = milik cabang; hanya boleh bila cabang membuka layanan langsung (atau Super Admin lintas cabang).
+  const allowEmpty = ctx.user?.branch_id == null || ctx.servesDirectly
   return [{ name: 'unit_id', label: 'Unit', type: 'combobox', allowEmpty, options: ctx.units.map((unit) => ({ value: unit.id, label: unit.unit_name, sublabel: unit.unit_code })) }]
 }
+/** Layanan boleh dikosongkan unitnya = berlaku untuk semua unit. Admin Unit tidak mengelola layanan. */
+const serviceUnitField = (ctx: CtxWithUnits): FieldDef[] => (ctx.units?.length ?? 0) === 0 ? [] : [{ name: 'unit_id', label: 'Berlaku untuk unit', type: 'combobox', allowEmpty: true, hint: 'Kosongkan agar layanan tersedia di semua unit.', options: ctx.units.map((unit) => ({ value: unit.id, label: unit.unit_name, sublabel: unit.unit_code })) }]
 const activeBadge = (row: { is_active: boolean; deleted_at?: string | null }) => row.deleted_at ? <Badge tone="red">Dihapus</Badge> : <Badge tone={row.is_active ? 'green' : 'slate'}>{row.is_active ? 'Aktif' : 'Nonaktif'}</Badge>
 const identity = (title: string, subtitle?: string | null) => <><p className="font-bold">{title}</p>{subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}</>
 
@@ -70,7 +73,7 @@ export const branchesConfig: MasterConfig<Branch> = {
     { name: 'branch_name', label: 'Nama cabang' },
     { name: 'address', label: 'Alamat', type: 'textarea' },
     { name: 'phone', label: 'Telepon' },
-    { name: 'is_active', label: 'Cabang aktif', type: 'checkbox', editOnly: true, hint: 'Cabang nonaktif tidak muncul pada pendaftaran online.' },
+    { name: 'is_active', label: 'Cabang aktif', type: 'checkbox', editOnly: true, hint: 'Cabang nonaktif tidak dapat dipakai untuk pendaftaran antrian.' },
   ],
   schema: () => z.object({ branch_code: code('Kode cabang', 30), branch_name: name('Nama cabang'), address: z.string().max(500).optional(), phone: z.string().max(40).optional(), is_active: z.boolean() }),
   defaults: () => ({ branch_code: '', branch_name: '', address: '', phone: '', is_active: true }),
@@ -115,24 +118,26 @@ export const servicesConfig: MasterConfig<ServiceType> = {
   columns: (ctx) => [
     { id: 'service', header: 'Layanan', meta: { sortKey: 'service_name' }, cell: ({ row }) => identity(row.original.service_name) },
     { id: 'prefix', header: 'Prefix', meta: { sortKey: 'queue_prefix' }, cell: ({ row }) => <span className="font-black text-brand">{row.original.queue_prefix}</span> },
+    { id: 'unit', header: 'Unit', cell: ({ row }) => <span className="text-slate-600">{row.original.unit?.unit_name ?? 'Semua unit'}</span> },
     { id: 'priority', header: 'Prioritas', cell: ({ row }) => <span className="text-slate-600">{row.original.priority_enabled ? 'Diaktifkan' : 'Tidak'}</span> },
     ...(ctx.isGlobal ? [{ id: 'branch', header: 'Cabang', cell: ({ row }: { row: { original: ServiceType } }) => <span className="text-slate-600">{ctx.branchName(row.original.branch_id)}</span> }] : []),
     { id: 'status', header: 'Status', meta: { sortKey: 'is_active' }, cell: ({ row }) => activeBadge(row.original) },
   ],
   fields: (ctx) => [
     ...branchField(ctx),
+    ...serviceUnitField(ctx as CtxWithUnits),
     { name: 'service_name', label: 'Nama layanan', placeholder: 'mis. Customer Service' },
     { name: 'queue_prefix', label: 'Prefix nomor antrian', placeholder: 'mis. CS', uppercase: true, hint: 'Huruf kapital/angka, unik per cabang.' },
     { name: 'priority_enabled', label: 'Izinkan antrian prioritas', type: 'checkbox' },
     { name: 'is_active', label: 'Layanan aktif', type: 'checkbox', editOnly: true, hint: 'Layanan nonaktif tidak muncul pada pendaftaran.' },
   ],
   schema: (editing, ctx) => z.object({
-    ...branchSchema(ctx, editing), service_name: name('Nama layanan'),
+    ...branchSchema(ctx, editing), unit_id: z.string().optional(), service_name: name('Nama layanan'),
     queue_prefix: z.string().trim().toUpperCase().min(1, 'Prefix wajib diisi').max(10, 'Maksimal 10 karakter').regex(/^[A-Z0-9]+$/, 'Hanya huruf kapital dan angka'),
     priority_enabled: z.boolean(), is_active: z.boolean(),
   }),
-  defaults: (ctx) => ({ ...defaultBranch(ctx), service_name: '', queue_prefix: '', priority_enabled: true, is_active: true }),
-  toForm: (row) => ({ service_name: row.service_name, queue_prefix: row.queue_prefix, priority_enabled: row.priority_enabled, is_active: row.is_active }),
+  defaults: (ctx) => ({ ...defaultBranch(ctx), unit_id: '', service_name: '', queue_prefix: '', priority_enabled: true, is_active: true }),
+  toForm: (row) => ({ unit_id: row.unit_id ?? '', service_name: row.service_name, queue_prefix: row.queue_prefix, priority_enabled: row.priority_enabled, is_active: row.is_active }),
 }
 
 function EmployeeAccessButton({ employee }: { employee: Employee }) {

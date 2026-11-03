@@ -89,7 +89,7 @@ export function KioskPage() {
 
   return <main className="flex min-h-screen flex-col bg-gradient-to-br from-slate-50 to-teal-50 text-ink" onPointerDown={() => setTouched((value) => value + 1)}>
     <header className="no-print flex items-center justify-between gap-4 bg-brand px-6 py-4 text-white sm:px-10">
-      <div><p className="text-xs font-semibold uppercase tracking-[0.3em] text-teal-100">Selamat datang</p><h1 className="text-2xl font-black sm:text-4xl">{config.branch.branch_name}</h1></div>
+      <div><p className="text-xs font-semibold uppercase tracking-[0.3em] text-teal-100">Selamat datang</p><h1 className="text-2xl font-black sm:text-4xl">{config.unit?.unit_name ?? config.branch.branch_name}</h1></div>
       <div className="text-right"><p className="text-3xl font-black tabular-nums sm:text-5xl">{clock.format(now)}</p><p className="text-xs text-teal-100 sm:text-sm">{dateFormat.format(now)}</p></div>
     </header>
 

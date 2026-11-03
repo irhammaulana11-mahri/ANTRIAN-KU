@@ -87,11 +87,17 @@ export function useDisplayFeed(onNewCall: (call: DisplayCall, speakable: boolean
   }, [phase])
 
   const branchId = snapshot?.branch.id
+  const unitId = snapshot?.unit?.id ?? null
+  const branchOnly = Boolean(snapshot?.branch_only)
   useEffect(() => {
     if (!branchId || !localStorage.getItem(DISPLAY_TOKEN_KEY)) return
     const echo = getEcho(DISPLAY_TOKEN_KEY)
-    const channel = echo.private(`branch.${branchId}`)
+    // Perangkat berunit hanya berlangganan channel unitnya; server menolak channel cabang.
+    const channelName = unitId ? `branch.${branchId}.unit.${unitId}` : `branch.${branchId}`
+    const channel = echo.private(channelName)
     CALL_EVENTS.forEach((name) => channel.listen(`.${name}`, (event: RealtimeEvent) => {
+      if (unitId && event.unit_id !== unitId) return // perangkat berunit: abaikan panggilan unit lain
+      if (branchOnly && event.unit_id) return // layar cabang: hanya antrian cabang, bukan antrian unit
       if (!guard.current.accept(event)) return // duplikat / urutan terbalik
       const call = callFromEvent({ ...event, event_name: name })
       if (!call) return
@@ -108,10 +114,10 @@ export function useDisplayFeed(onNewCall: (call: DisplayCall, speakable: boolean
     return () => {
       connection?.unbind('connected', onUp)
       ;['disconnected', 'unavailable', 'failed'].forEach((name) => connection?.unbind(name, onDown))
-      echo.leave(`branch.${branchId}`)
+      echo.leave(channelName)
       window.clearTimeout(reloadTimer.current)
     }
-  }, [branchId, epoch, load, scheduleReload])
+  }, [branchId, unitId, branchOnly, epoch, load, scheduleReload])
 
   return { phase, error, snapshot, calls, connected, pair, unpair }
 }

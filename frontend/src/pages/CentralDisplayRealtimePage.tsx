@@ -75,7 +75,7 @@ export function CentralDisplayRealtimePage() {
     <header className="flex flex-wrap items-center justify-between gap-4">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.3em] text-teal-300">Informasi Antrian</p>
-        <h1 className="mt-1 text-3xl font-black sm:text-5xl">{snapshot.branch.branch_name}</h1>
+        <h1 className="mt-1 text-3xl font-black sm:text-5xl">{snapshot.unit?.unit_name ?? snapshot.branch.branch_name}</h1>{snapshot.unit && <p className="mt-1 text-lg text-slate-400">{snapshot.branch.branch_name}</p>}
       </div>
       <div className="flex items-center gap-4">
         <div className="text-right"><p className="text-4xl font-black tabular-nums sm:text-6xl">{clock.format(now)}</p><p className="text-sm text-slate-400 sm:text-base">{dateFormat.format(now)}</p></div>

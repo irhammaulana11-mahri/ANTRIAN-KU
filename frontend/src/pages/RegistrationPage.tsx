@@ -21,7 +21,7 @@ import type { PriorityOption } from '@/types/api'
 
 const schema = z.object({
   branch_id: z.string().uuid('Pilih cabang'),
-  unit_id: z.string().uuid('Pilih unit').optional(),
+  unit_id: z.string().optional(),
   service_type_id: z.string().uuid('Pilih jenis layanan'),
   customer_name: z.string().trim().min(2, 'Nama minimal 2 karakter').max(150, 'Nama terlalu panjang'),
   customer_phone: z.string().trim().max(40).regex(/^$|^[0-9+\-\s()]{8,20}$/, 'Nomor telepon tidak valid').optional(),
@@ -65,10 +65,10 @@ export function CustomerRegistrationPage() {
 
   // Admin Cabang: pick unit within their branch
   const units = useQuery({
-    queryKey: ['units-dropdown', userBranchId],
+    queryKey: ['units-lookup-registration', userBranchId],
     enabled: needsUnitPick,
     staleTime: 60_000,
-    queryFn: async () => (await api.get<{ data: Unit[] }>('/units/dropdown', { params: { branch_id: userBranchId } })).data.data,
+    queryFn: async () => (await api.get<{ data: Unit[]; meta?: { branch_serves_directly: boolean } }>('/units/dropdown', { params: { branch_id: userBranchId } })).data,
   })
 
   const services = useQuery({
@@ -108,7 +108,7 @@ export function CustomerRegistrationPage() {
       return { data: data.data, values }
     },
     onSuccess: ({ data, values }) => {
-      const resolvedUnitName = userUnitName || units.data?.find((u) => u.id === (values.unit_id || unitId))?.unit_name || ''
+      const resolvedUnitName = userUnitName || units.data?.data.find((u) => u.id === (values.unit_id || unitId))?.unit_name || ''
       setTicket({
         queue: data.queue,
         token: data.token,
@@ -173,8 +173,8 @@ export function CustomerRegistrationPage() {
           {needsUnitPick && <Field label="Unit" error={errors.unit_id?.message}>
             {units.isLoading ? <Select disabled><option>Memuat unit…</option></Select>
               : <Select {...register('unit_id')}>
-                  <option value="">Pilih unit</option>
-                  {(units.data ?? []).map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name} ({unit.unit_code})</option>)}
+                  <option value="">{units.data?.meta?.branch_serves_directly === false ? 'Pilih unit' : 'Cabang (layanan langsung)'}</option>
+                  {(units.data?.data ?? []).map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name} ({unit.unit_code})</option>)}
                 </Select>}
           </Field>}
 

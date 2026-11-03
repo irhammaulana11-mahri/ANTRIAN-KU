@@ -8,6 +8,8 @@ const baseURL = import.meta.env.VITE_API_URL ?? '/api/v1'
 export interface DisplaySnapshot {
   server_time: string
   branch: { id: string; branch_name: string }
+  unit?: { id: string; unit_name: string | null } | null
+  branch_only?: boolean
   settings: { announcement: string | null; voice_rate: number; voice_volume: number; media_volume: number; call_expiry_seconds: number; media?: DisplayMediaSource[] }
   calls: DisplayCall[]
   waiting: { service_name: string; total: number }[]

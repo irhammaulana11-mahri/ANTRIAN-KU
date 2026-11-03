@@ -6,6 +6,7 @@ export const KIOSK_TOKEN_KEY = 'sqms_kiosk_token'
 export interface KioskConfig {
   server_time: string
   branch: { id: string; branch_name: string }
+  unit?: { id: string; unit_name: string | null } | null
   services: { id: string; service_name: string; queue_prefix: string }[]
   availability: { is_open: boolean; message: string | null; opens_at: string | null; closes_at: string | null; waiting_count: number }
 }

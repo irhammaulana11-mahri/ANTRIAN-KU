@@ -13,9 +13,9 @@ import { ConfirmDialog, Modal } from '@/components/ui/Modal'
 import { BranchGate } from '@/components/BranchGate'
 import { can } from '@/lib/access'
 import { formatDate } from '@/lib/utils'
-import type { Branch } from '@/types/api'
+import type { Branch, Unit } from '@/types/api'
 
-interface Device { id: string; branch_id: string; device_code: string; device_name: string; device_type: 'DISPLAY' | 'KIOSK'; last_seen_at: string | null; revoked_at: string | null; is_online: boolean }
+interface Device { id: string; branch_id: string; unit_id: string | null; unit_name: string | null; device_code: string; device_name: string; device_type: 'DISPLAY' | 'KIOSK'; last_seen_at: string | null; revoked_at: string | null; is_online: boolean }
 interface MediaRow { type: 'STREAM' | 'YOUTUBE'; label: string; url: string }
 interface DisplaySettings { display_announcement: string | null; voice_rate: number; voice_volume: number; media_volume: number; display_media?: { type: 'STREAM' | 'YOUTUBE'; label: string | null; url: string }[] }
 const MAX_MEDIA = 5
@@ -25,23 +25,42 @@ export function DisplayDevicesPage() {
   const client = useQueryClient()
   const isGlobal = user?.branch_id == null
   const [branchId, setBranchId] = useState(user?.branch_id ?? '')
+  const hasOwnUnit = Boolean(user?.unit_id)
+  const [unitId, setUnitId] = useState('')
+  const [filterUnit, setFilterUnit] = useState('')
   const [form, setForm] = useState({ device_code: '', device_name: '', device_type: 'DISPLAY' as 'DISPLAY' | 'KIOSK' })
   const [credential, setCredential] = useState<{ value: string; device: string; type: 'DISPLAY' | 'KIOSK' } | null>(null)
   const [copied, setCopied] = useState(false)
   const [confirmRotate, setConfirmRotate] = useState<Device | null>(null)
   const [confirmRevoke, setConfirmRevoke] = useState<Device | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<Device | null>(null)
+  const [assign, setAssign] = useState<{ device: Device; unitId: string } | null>(null)
 
   const branches = useQuery({ queryKey: ['branches-for-form'], enabled: isGlobal, queryFn: async () => (await api.get<{ data: Branch[] }>('/branches', { params: { per_page: 100 } })).data.data })
   useEffect(() => { if (isGlobal && !branchId && branches.data?.length) setBranchId(branches.data[0].id) }, [isGlobal, branchId, branches.data])
 
-  const devices = useQuery({ queryKey: ['display-devices', branchId], enabled: Boolean(branchId), refetchInterval: 15000, queryFn: async () => (await api.get<{ data: Device[] }>('/display-devices', { params: { branch_id: branchId || undefined } })).data.data })
+  // Unit pada cabang terpilih. Admin Unit hanya menerima unitnya sendiri dari server.
+  const units = useQuery({ queryKey: ['units-lookup', user?.id, branchId], enabled: Boolean(branchId) && can(user, 'units.view'), staleTime: 60_000, queryFn: async () => (await api.get<{ data: Unit[]; meta?: { branch_serves_directly: boolean } }>('/units/dropdown', { params: { branch_id: branchId || undefined } })).data })
+  const unitList = units.data?.data ?? []
+  const servesDirectly = units.data?.meta?.branch_serves_directly ?? true
+  useEffect(() => { setUnitId(''); setFilterUnit('') }, [branchId])
+
+  const devices = useQuery({ queryKey: ['display-devices', branchId, filterUnit], enabled: Boolean(branchId), refetchInterval: 15000, queryFn: async () => (await api.get<{ data: Device[] }>('/display-devices', { params: { branch_id: branchId || undefined, unit_id: filterUnit || undefined } })).data.data })
   const create = useMutation({
-    mutationFn: async () => (await api.post<{ data: Device; credential: string }>('/display-devices', { ...form, branch_id: branchId })).data,
+    mutationFn: async () => (await api.post<{ data: Device; credential: string }>('/display-devices', { ...form, branch_id: branchId, unit_id: hasOwnUnit ? undefined : unitId })).data,
     onSuccess: (result) => { setCredential({ value: result.credential, device: result.data.device_name, type: result.data.device_type }); setForm({ device_code: '', device_name: '', device_type: form.device_type }); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
   })
   const rotate = useMutation({
     mutationFn: async (device: Device) => ({ device, result: (await api.post<{ credential: string }>(`/display-devices/${device.id}/rotate`)).data }),
     onSuccess: ({ device, result }) => { setConfirmRotate(null); setCredential({ value: result.credential, device: device.device_name, type: device.device_type }); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
+  })
+  const assignUnit = useMutation({
+    mutationFn: async (target: { device: Device; unitId: string }) => api.put(`/display-devices/${target.device.id}/unit`, { unit_id: target.unitId }),
+    onSuccess: () => { setAssign(null); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
+  })
+  const remove = useMutation({
+    mutationFn: async (device: Device) => api.delete(`/display-devices/${device.id}`),
+    onSuccess: () => { setConfirmDelete(null); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
   })
   const revoke = useMutation({
     mutationFn: async (device: Device) => api.post(`/display-devices/${device.id}/revoke`),
@@ -98,16 +117,21 @@ export function DisplayDevicesPage() {
     <BranchGate isGlobal={isGlobal} branchId={branchId} branches={branches}>
     <div className="grid gap-6 xl:grid-cols-[1.4fr_.6fr]">
       <Card>
-        <CardHeader title="Daftar perangkat" description="Status online berdasarkan aktivitas terakhir (2 menit)." />
+        <CardHeader title="Daftar perangkat" description={hasOwnUnit ? 'Perangkat unit Anda. Status online berdasarkan aktivitas terakhir (2 menit).' : 'Status online berdasarkan aktivitas terakhir (2 menit).'} />
+        {!hasOwnUnit && <div className="mb-4"><Select className="w-64" value={filterUnit} onChange={(event) => setFilterUnit(event.target.value)} aria-label="Filter unit"><option value="">Semua titik layanan</option>{unitList.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name}</option>)}</Select></div>}
         {devices.isLoading ? <Loading /> : devices.isError ? <ErrorState message={errorMessage(devices.error)} /> : (devices.data ?? []).length === 0 ? <EmptyState message="Belum ada perangkat display di cabang ini." /> :
-          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-3">Perangkat</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Terakhir aktif</th><th className="px-3 py-3" /></tr></thead>
+          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-3">Perangkat</th><th className="px-3 py-3">Unit</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Terakhir aktif</th><th className="px-3 py-3" /></tr></thead>
             <tbody className="divide-y divide-slate-100">{(devices.data ?? []).map((device) => <tr key={device.id}>
               <td className="px-3 py-4"><p className="font-bold">{device.device_name}</p><p className="text-xs text-slate-500">{device.device_code} · {device.device_type === 'KIOSK' ? 'Kiosk antrian' : 'Central Display'}</p></td>
+              <td className="px-3 py-4 text-slate-600">{device.unit_name ?? (!hasOwnUnit && unitList.length > 0
+                ? <Select className="w-44 py-1.5 text-xs" value="" aria-label={`Tentukan unit ${device.device_name}`} onChange={(event) => { assignUnit.reset(); setAssign({ device, unitId: event.target.value }) }}><option value="" disabled>{servesDirectly ? 'Cabang · pindah ke unit…' : 'Tentukan unit…'}</option>{unitList.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name}</option>)}</Select>
+                : <span className="text-slate-400">—</span>)}</td>
               <td className="px-3 py-4">{device.revoked_at ? <Badge tone="red">Dinonaktifkan</Badge> : device.is_online ? <Badge tone="green">Online</Badge> : <Badge>Offline</Badge>}</td>
               <td className="whitespace-nowrap px-3 py-4 text-slate-500">{formatDate(device.last_seen_at)}</td>
               <td className="px-3 py-4"><div className="flex justify-end gap-2">
                 <Button variant="secondary" className="whitespace-nowrap px-3 py-1.5 text-xs" disabled={rotate.isPending} onClick={() => setConfirmRotate(device)}><RefreshCcw size={14} className="mr-1.5" />{device.revoked_at ? 'Aktifkan ulang' : 'Kunci baru'}</Button>
                 {!device.revoked_at && <Button variant="ghost" className="whitespace-nowrap px-3 py-1.5 text-xs text-red-600 hover:bg-red-50" disabled={revoke.isPending} onClick={() => setConfirmRevoke(device)}><Power size={14} className="mr-1.5" />Nonaktifkan</Button>}
+                <Button variant="ghost" aria-label={`Hapus ${device.device_name}`} title="Hapus perangkat" className="px-2 py-1.5 text-red-600 hover:bg-red-50" disabled={remove.isPending} onClick={() => { remove.reset(); setConfirmDelete(device) }}><Trash2 size={15} /></Button>
               </div></td></tr>)}</tbody></table></div>}
       </Card>
 
@@ -115,11 +139,14 @@ export function DisplayDevicesPage() {
         <Card>
           <CardHeader title="Tambah perangkat" />
           <div className="space-y-4">
+            {hasOwnUnit
+              ? <Field label="Unit" hint="Perangkat otomatis tertaut ke unit Anda."><Input readOnly value={unitList[0]?.unit_name ?? '…'} aria-label="Unit" /></Field>
+              : <Field label="Unit"><Select value={unitId} onChange={(event) => setUnitId(event.target.value)} aria-label="Unit perangkat">{servesDirectly ? <option value="">Cabang (tanpa unit)</option> : <option value="" disabled>Pilih unit…</option>}{unitList.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name}</option>)}</Select>{fieldError(create.error, 'unit_id') && <p role="alert" className="mt-1 text-xs text-red-600">{fieldError(create.error, 'unit_id')}</p>}</Field>}
             <Field label="Tipe perangkat"><Select value={form.device_type} onChange={(event) => setForm({ ...form, device_type: event.target.value as 'DISPLAY' | 'KIOSK' })}><option value="DISPLAY">Central Display (TV)</option><option value="KIOSK">Kiosk antrian (tablet)</option></Select></Field>
             <Field label="Nama perangkat"><Input value={form.device_name} onChange={(event) => setForm({ ...form, device_name: event.target.value })} placeholder="TV Lobby / Kiosk Lobby" /></Field>
             <Field label="Kode perangkat"><Input value={form.device_code} onChange={(event) => setForm({ ...form, device_code: event.target.value })} placeholder="TV-LOBBY-01" /></Field>
             {create.isError && <p className="text-sm text-red-600">{errorMessage(create.error)}</p>}
-            <Button className="w-full" disabled={create.isPending || !branchId || !form.device_code || !form.device_name} onClick={() => create.mutate()}><Plus size={16} className="mr-2" />{create.isPending ? 'Membuat…' : 'Buat perangkat'}</Button>
+            <Button className="w-full" disabled={create.isPending || !branchId || (!hasOwnUnit && !unitId && !servesDirectly) || !form.device_code || !form.device_name} onClick={() => create.mutate()}><Plus size={16} className="mr-2" />{create.isPending ? 'Membuat…' : 'Buat perangkat'}</Button>
           </div>
         </Card>
 
@@ -169,6 +196,27 @@ export function DisplayDevicesPage() {
       onCancel={() => setConfirmRotate(null)}
       busy={rotate.isPending}
       error={rotate.isError ? errorMessage(rotate.error) : undefined}
+    />}
+
+    {assign && <ConfirmDialog
+      title="Tentukan unit perangkat?"
+      message={`Perangkat "${assign.device.device_name}" akan ditetapkan ke unit "${unitList.find((unit) => unit.id === assign.unitId)?.unit_name ?? ''}" dan hanya menampilkan antrian unit tersebut. Unit tidak dapat diubah setelah ditetapkan.`}
+      confirmLabel="Tetapkan unit"
+      onConfirm={() => assignUnit.mutate(assign)}
+      onCancel={() => setAssign(null)}
+      busy={assignUnit.isPending}
+      error={assignUnit.isError ? errorMessage(assignUnit.error) : undefined}
+    />}
+
+    {confirmDelete && <ConfirmDialog
+      title="Hapus perangkat?"
+      message={`Perangkat "${confirmDelete.device_name}" (${confirmDelete.device_code}) akan dihapus dari daftar dan langsung keluar dari sistem. Kode perangkat dapat dipakai lagi.`}
+      confirmLabel="Hapus"
+      danger
+      onConfirm={() => remove.mutate(confirmDelete)}
+      onCancel={() => setConfirmDelete(null)}
+      busy={remove.isPending}
+      error={remove.isError ? errorMessage(remove.error) : undefined}
     />}
 
     {confirmRevoke && <ConfirmDialog

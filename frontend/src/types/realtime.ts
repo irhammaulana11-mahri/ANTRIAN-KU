@@ -3,6 +3,7 @@ export interface RealtimeEvent {
   occurred_at: string
   branch_id: string
   queue_id?: string
+  unit_id?: string | null
   queue_number?: string
   customer_name?: string
   service_type_id?: string

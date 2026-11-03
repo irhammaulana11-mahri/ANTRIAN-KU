@@ -37,7 +37,7 @@ function FormDialog<T extends MasterRow>({ config, ctx, row, onClose, onSaved }:
       if (editing) return (await api.put(`${config.path}/${row.id}`, payload)).data
       return (await api.post(config.path, payload)).data
     },
-    onSuccess: () => { void client.invalidateQueries({ queryKey: [config.key] }); if (config.key === 'units') void client.invalidateQueries({ queryKey: ['units-dropdown'] }); onSaved(editing ? `${config.singular} diperbarui.` : `${config.singular} ditambahkan.`) },
+    onSuccess: () => { void client.invalidateQueries({ queryKey: [config.key] }); if (config.key === 'units') { void client.invalidateQueries({ queryKey: ['units-dropdown'] }); void client.invalidateQueries({ queryKey: ['units-lookup'] }) }; onSaved(editing ? `${config.singular} diperbarui.` : `${config.singular} ditambahkan.`) },
     onError: (error) => {
       const serverErrors = (error as { response?: { data?: { errors?: Record<string, string[]> } } }).response?.data?.errors ?? {}
       const names = new Set(fields.map((field) => field.name))
@@ -96,8 +96,8 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
 
   const branches = useQuery({ queryKey: ['branches-lookup', user?.id], enabled: isGlobal || config.branchScoped, staleTime: 60_000, queryFn: async () => (await api.get<{ data: Branch[] }>('/branches', { params: { per_page: 100 } })).data.data })
   // Muat daftar unit untuk dropdown field unit_id (loket & petugas). Hanya pada halaman branch-scoped agar tidak memuat ganda.
-  const units = useQuery({ queryKey: ['units-dropdown', user?.id, user?.branch_id, user?.unit_id], enabled: config.branchScoped && can(user, 'units.view'), staleTime: 60_000, queryFn: async () => (await api.get<{ data: Unit[] }>('/units/dropdown')).data.data })
-  const ctx = useMemo<CtxWithUnits>(() => ({ user, isGlobal, branches: branches.data ?? [], units: units.data ?? [], branchName: (id) => (branches.data ?? []).find((branch) => branch.id === id)?.branch_name ?? '—' }), [user, isGlobal, branches.data, units.data])
+  const units = useQuery({ queryKey: ['units-dropdown', user?.id, user?.branch_id, user?.unit_id], enabled: config.branchScoped && can(user, 'units.view'), staleTime: 60_000, queryFn: async () => (await api.get<{ data: Unit[]; meta?: { branch_serves_directly: boolean } }>('/units/dropdown')).data })
+  const ctx = useMemo<CtxWithUnits>(() => ({ user, isGlobal, branches: branches.data ?? [], units: units.data?.data ?? [], servesDirectly: units.data?.meta?.branch_serves_directly ?? true, branchName: (id) => (branches.data ?? []).find((branch) => branch.id === id)?.branch_name ?? '—' }), [user, isGlobal, branches.data, units.data])
 
   const params = { q: q || undefined, is_active: status === 'deleted' ? undefined : status || undefined, deleted: status === 'deleted' ? 1 : undefined, branch_id: (isGlobal && config.branchScoped ? branchFilter : '') || undefined, sort: sort.key, direction: sort.direction, page, per_page: perPage, ...Object.fromEntries(Object.entries(extra).filter(([, value]) => value)) }
   const list = useQuery({ queryKey: [config.key, params], placeholderData: keepPreviousData, queryFn: async () => (await api.get<Listing<T>>(config.path, { params })).data })
