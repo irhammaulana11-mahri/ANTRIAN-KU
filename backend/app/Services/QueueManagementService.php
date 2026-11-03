@@ -59,6 +59,7 @@ class QueueManagementService
             $queue = Queue::create([
                 'id' => (string) Str::uuid(),
                 'branch_id' => $data['branch_id'],
+                'unit_id' => $data['unit_id'] ?? $actor?->unit_id,
                 'service_type_id' => $service->id,
                 'priority_type_id' => $priority?->id,
                 'queue_date' => $queueDate,
@@ -229,7 +230,16 @@ class QueueManagementService
         $branchId = $this->branches->resolve($user, $request->input('branch_id'));
         $serviceIds = $this->visibleServiceIds($user);
 
-        return Queue::query()->with(['serviceType', 'priorityType'])->when($serviceIds !== null, fn ($q) => $q->whereIn('service_type_id', $serviceIds))->when($branchId, fn ($q) => $q->where('branch_id', $branchId))->when($request->input('status'), fn ($q, $status) => $q->where('status', $status))->when($request->input('queue_date'), fn ($q, $date) => $q->whereDate('queue_date', $date))->latest();
+        $unitId = $this->branches->resolveUnit($user, $request->input('unit_id'));
+        $date = $request->input('queue_date', now()->toDateString());
+
+        return Queue::query()->with(['serviceType', 'priorityType'])
+            ->when($serviceIds !== null, fn ($q) => $q->whereIn('service_type_id', $serviceIds))
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->when($unitId, fn ($q) => $q->where('unit_id', $unitId))
+            ->whereDate('queue_date', $date)
+            ->when($request->input('status'), fn ($q, $status) => $q->where('status', $status))
+            ->latest();
     }
 
     /** Petugas non-supervisor hanya melihat layanan yang menjadi kompetensinya; null = tanpa batasan. */

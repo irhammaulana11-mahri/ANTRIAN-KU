@@ -12,7 +12,8 @@ class RolePermissionSeeder extends Seeder
     public function run(): void
     {
         $permissions = [
-            'branches.view', 'branches.manage', 'users.manage', 'employees.view', 'employees.manage',
+            'branches.view', 'branches.manage', 'units.view', 'units.manage',
+            'users.manage', 'employees.view', 'employees.manage',
             'services.view', 'services.manage', 'counters.view', 'counters.manage', 'queues.view',
             'queues.register', 'queues.cancel', 'queues.assign', 'queues.call', 'queues.recall',
             'queues.start', 'queues.complete', 'queues.skip', 'queues.transfer', 'employees.status',
@@ -26,14 +27,20 @@ class RolePermissionSeeder extends Seeder
         $rolePermissions = [
             'Super Admin' => $permissions,
             'Admin Cabang' => [
-                'branches.view', 'employees.view', 'employees.manage', 'services.view', 'services.manage',
-                'counters.view', 'counters.manage', 'queues.view', 'queues.register', 'queues.cancel',
+                'branches.view', 'units.view', 'units.manage',
+                'employees.view', 'employees.manage', 'users.manage',
+                'services.view', 'services.manage', 'counters.view', 'counters.manage',
+                'queues.view', 'queues.register', 'queues.cancel',
                 'reports.view', 'settings.manage', 'displays.manage', 'audit.view',
             ],
-            'Supervisor' => [
-                'employees.view', 'services.view', 'counters.view', 'queues.view', 'queues.assign',
-                'queues.call', 'queues.recall', 'queues.start', 'queues.complete', 'queues.skip',
-                'queues.transfer', 'employees.status', 'reports.view',
+            // Admin Unit: kelola pegawai (CS/Teller), loket, dan supervisi antrian di unitnya
+            'Admin Unit' => [
+                'units.view', 'employees.view', 'employees.manage', 'users.manage',
+                'services.view', 'counters.view', 'counters.manage',
+                'queues.view', 'queues.register', 'queues.cancel', 'queues.assign',
+                'queues.call', 'queues.recall', 'queues.start', 'queues.complete',
+                'queues.skip', 'queues.transfer', 'employees.status',
+                'reports.view', 'displays.manage',
             ],
             'Customer Service' => [
                 'queues.view', 'queues.call', 'queues.recall', 'queues.start', 'queues.complete',

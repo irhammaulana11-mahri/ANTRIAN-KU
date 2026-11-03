@@ -17,7 +17,7 @@ class ServiceTypeController extends Controller
     {
         $this->authorize('viewAny', ServiceType::class);
         $query = $this->service->scope(new ServiceType, $request->user(), $request->attributes->get('branch_id'));
-        $this->service->listing($query, $request, ['service_types.service_code', 'service_types.service_name', 'service_types.queue_prefix'], ['service_code', 'service_name', 'queue_prefix', 'is_active', 'created_at'], 'service_name');
+        $this->service->listing($query, $request, ['service_types.service_name', 'service_types.queue_prefix'], ['service_name', 'queue_prefix', 'is_active', 'created_at'], 'service_name');
 
         return ServiceTypeResource::collection($query->paginate($this->service->perPage($request)));
     }

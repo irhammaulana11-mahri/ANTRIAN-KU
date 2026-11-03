@@ -13,7 +13,7 @@ class ServiceType extends Model
 
     public $incrementing = false;
 
-    protected $fillable = ['id', 'branch_id', 'service_code', 'service_name', 'queue_prefix', 'priority_enabled', 'is_active'];
+    protected $fillable = ['id', 'branch_id', 'service_name', 'queue_prefix', 'priority_enabled', 'is_active'];
 
     protected function casts(): array
     {

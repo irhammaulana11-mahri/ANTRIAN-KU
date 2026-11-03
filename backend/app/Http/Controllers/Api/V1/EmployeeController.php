@@ -18,7 +18,19 @@ class EmployeeController extends Controller
     public function index(Request $request)
     {
         $this->authorize('viewAny', Employee::class);
-        $query = $this->service->scope(new Employee, $request->user(), $request->attributes->get('branch_id'))->with(['user.roles', 'serviceTypes', 'counters']);
+        $actor = $request->user();
+        $query = $this->service->scope(new Employee, $actor, $request->attributes->get('branch_id'))->with(['user.roles', 'serviceTypes', 'counters', 'unit']);
+
+        // Tampilkan hanya petugas di bawah hirarki aktor: Admin Unit → CS/Teller saja; Admin Cabang → Admin Unit + CS/Teller.
+        if ($actor->unit_id !== null) {
+            // Admin Unit: hanya tampilkan CS dan Teller
+            $query->whereHas('user.roles', fn ($r) => $r->whereIn('name', ['Customer Service', 'Teller']));
+        } elseif ($actor->branch_id !== null) {
+            // Admin Cabang: tampilkan Admin Unit, CS, dan Teller
+            $query->whereHas('user.roles', fn ($r) => $r->whereIn('name', ['Admin Unit', 'Customer Service', 'Teller']));
+        }
+        // Super Admin (branch_id===null): tampilkan semua
+
         $query->when($request->filled('role'), fn ($q) => $q->whereHas('user.roles', fn ($roles) => $roles->where('name', $request->string('role')->toString())));
         $this->service->listing(
             $query, $request, ['employees.employee_code', 'employees.employee_name'], ['employee_code', 'employee_name', 'is_active', 'created_at'], 'employee_name',

@@ -15,6 +15,7 @@ class QueueRegistrationRequest extends FormRequest
     {
         return [
             'branch_id' => ['required', 'uuid', 'exists:branches,id'],
+            'unit_id' => ['nullable', 'uuid', 'exists:units,id'],
             'service_type_id' => ['required', 'uuid', 'exists:service_types,id'],
             'customer_name' => ['required', 'string', 'max:150'],
             'customer_phone' => ['nullable', 'string', 'max:40'],

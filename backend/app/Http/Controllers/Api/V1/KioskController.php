@@ -41,7 +41,7 @@ class KioskController extends Controller
     {
         /** @var DisplayDevice $device */
         $device = $request->user()->loadMissing('branch');
-        $data = $request->validated() + ['branch_id' => $device->branch_id];
+        $data = $request->validated() + ['branch_id' => $device->branch_id, 'unit_id' => $device->unit_id];
 
         $result = $this->queues->register($data, 'WALK_IN', null);
         $this->distribution->assignNext($device->branch_id, $data['service_type_id']);

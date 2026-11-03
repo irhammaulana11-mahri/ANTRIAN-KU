@@ -13,7 +13,7 @@ class Counter extends Model
 
     public $incrementing = false;
 
-    protected $fillable = ['id', 'branch_id', 'counter_code', 'counter_name', 'counter_type', 'is_active'];
+    protected $fillable = ['id', 'branch_id', 'unit_id', 'counter_code', 'counter_name', 'counter_type', 'is_active'];
 
     protected function casts(): array
     {
@@ -23,6 +23,11 @@ class Counter extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function unit()
+    {
+        return $this->belongsTo(Unit::class);
     }
 
     public function employees()

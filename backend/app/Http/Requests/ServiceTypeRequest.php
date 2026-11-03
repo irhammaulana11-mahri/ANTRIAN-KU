@@ -28,7 +28,6 @@ class ServiceTypeRequest extends FormRequest
 
         return [
             'branch_id' => ['nullable', 'uuid'],
-            'service_code' => [$required, 'string', 'max:40', 'alpha_dash', $unique('service_code')],
             'service_name' => [$required, 'string', 'max:150'],
             'queue_prefix' => [$required, 'string', 'max:10', 'regex:/^[A-Z0-9]+$/', $unique('queue_prefix')],
             'priority_enabled' => ['sometimes', 'boolean'],
@@ -39,7 +38,6 @@ class ServiceTypeRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'service_code.unique' => 'Kode layanan sudah digunakan pada cabang ini (termasuk layanan yang sudah dihapus).',
             'queue_prefix.unique' => 'Prefix antrian sudah digunakan layanan lain pada cabang ini.',
             'queue_prefix.regex' => 'Prefix hanya boleh huruf kapital dan angka tanpa spasi atau tanda hubung.',
         ];

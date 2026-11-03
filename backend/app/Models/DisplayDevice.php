@@ -21,9 +21,9 @@ class DisplayDevice extends Authenticatable
 
     public $incrementing = false;
 
-    protected $fillable = ['id', 'branch_id', 'device_code', 'device_name', 'credential_hash', 'device_type', 'last_seen_at', 'revoked_at'];
+    protected $fillable = ['id', 'branch_id', 'unit_id', 'device_code', 'device_name', 'credential_hash', 'activation_code', 'device_type', 'last_seen_at', 'revoked_at'];
 
-    protected $hidden = ['credential_hash'];
+    protected $hidden = ['credential_hash', 'activation_code'];
 
     protected function casts(): array
     {
@@ -33,6 +33,11 @@ class DisplayDevice extends Authenticatable
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function unit()
+    {
+        return $this->belongsTo(Unit::class);
     }
 
     /** Ability token = tipe perangkat huruf kecil ('display' / 'kiosk'). */

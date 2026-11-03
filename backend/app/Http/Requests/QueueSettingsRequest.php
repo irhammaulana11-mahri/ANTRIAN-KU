@@ -18,6 +18,7 @@ class QueueSettingsRequest extends FormRequest
             'branch_id' => ['nullable', 'uuid'],
             'online_daily_quota' => ['nullable', 'integer', 'min:0', 'max:100000'],
             'max_waiting_threshold' => ['nullable', 'integer', 'min:0', 'max:100000'],
+            'offline_only' => ['sometimes', 'boolean'],
             'operating_hours' => ['sometimes', 'array', 'size:7'],
             'operating_hours.*.weekday' => ['required', 'integer', 'between:1,7', 'distinct'],
             'operating_hours.*.is_closed' => ['required', 'boolean'],

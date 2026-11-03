@@ -25,7 +25,7 @@ class QueueSettingsController extends Controller
     public function update(QueueSettingsRequest $request): JsonResponse
     {
         $branchId = $this->branchId($request);
-        $data = $this->settings->update($branchId, $request->safe()->only(['online_daily_quota', 'max_waiting_threshold', 'operating_hours']), $request->user()->id);
+        $data = $this->settings->update($branchId, $request->safe()->only(['online_daily_quota', 'max_waiting_threshold', 'offline_only', 'operating_hours']), $request->user()->id);
 
         return response()->json(['data' => $data + ['availability' => $this->availability->status($branchId)], 'message' => 'Pengaturan antrian disimpan.']);
     }

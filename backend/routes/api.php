@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\V1\QueueSettingsController;
 use App\Http\Controllers\Api\V1\ReportingController;
 use App\Http\Controllers\Api\V1\ServiceTypeController;
 use App\Http\Controllers\Api\V1\SupervisorController;
+use App\Http\Controllers\Api\V1\UnitController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('docs', [ApiDocsController::class, 'ui']);
@@ -52,14 +53,19 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
         Route::get('settings/display', [DisplaySettingsController::class, 'show']);
         Route::put('settings/display', [DisplaySettingsController::class, 'update']);
         Route::get('auth/me', [AuthController::class, 'me']);
+        Route::put('auth/profile', [AuthController::class, 'updateProfile']);
+        Route::put('auth/password', [AuthController::class, 'updatePassword']);
         Route::post('auth/logout', [AuthController::class, 'logout']);
         Route::post('auth/refresh', [AuthController::class, 'refresh']);
 
         Route::post('branches/{branch}/restore', [BranchController::class, 'restore'])->withTrashed();
+        Route::post('units/{unit}/restore', [UnitController::class, 'restore'])->withTrashed();
         Route::post('employees/{employee}/restore', [EmployeeController::class, 'restore'])->withTrashed();
         Route::post('counters/{counter}/restore', [CounterController::class, 'restore'])->withTrashed();
         Route::post('service-types/{service_type}/restore', [ServiceTypeController::class, 'restore'])->withTrashed();
         Route::apiResource('branches', BranchController::class);
+        Route::get('units/dropdown', [UnitController::class, 'dropdown']);
+        Route::apiResource('units', UnitController::class);
         Route::apiResource('employees', EmployeeController::class);
         Route::put('employees/{employee}/competencies', [EmployeeController::class, 'competencies']);
         Route::put('employees/{employee}/counters', [EmployeeController::class, 'counters']);

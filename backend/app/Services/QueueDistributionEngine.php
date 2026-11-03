@@ -52,7 +52,7 @@ class QueueDistributionEngine
     public function assignPending(string $branchId, int $limit = 50): int
     {
         $count = 0;
-        $serviceIds = ServiceType::query()->where('branch_id', $branchId)->where('is_active', true)->orderBy('service_code')->pluck('id');
+        $serviceIds = ServiceType::query()->where('branch_id', $branchId)->where('is_active', true)->orderBy('service_name')->pluck('id');
         foreach ($serviceIds as $serviceId) {
             while ($count < $limit && $this->assignNext($branchId, $serviceId) !== null) {
                 $count++;
@@ -126,7 +126,7 @@ class QueueDistributionEngine
     {
         $assignment = QueueAssignment::create(['id' => (string) Str::uuid(), 'branch_id' => $queue->branch_id, 'queue_id' => $queue->id, 'employee_id' => $employee->id, 'counter_id' => $counter->id, 'assignment_type' => $type, 'reason' => $reason, 'assigned_at' => now()]);
         $from = $queue->status;
-        $queue->update(['status' => Queue::ASSIGNED]);
+        $queue->update(['status' => Queue::ASSIGNED, 'unit_id' => $queue->unit_id ?? $counter->unit_id ?? $employee->unit_id]);
         EmployeeStatusLog::create(['id' => (string) Str::orderedUuid(), 'branch_id' => $employee->branch_id, 'employee_id' => $employee->id, 'from_status' => EmployeeStatusService::AVAILABLE, 'to_status' => EmployeeStatusService::BUSY, 'reason' => 'Queue assignment', 'heartbeat_at' => null, 'recorded_at' => now()]);
         EmployeeStatusChanged::dispatch($employee->branch_id, ['employee_id' => $employee->id, 'status' => EmployeeStatusService::BUSY], $employee->id);
         QueueTransition::create(['id' => (string) Str::uuid(), 'branch_id' => $queue->branch_id, 'queue_id' => $queue->id, 'from_status' => $from, 'to_status' => Queue::ASSIGNED, 'actor_id' => $actor?->id, 'reason' => $reason ?? 'Automatic queue assignment', 'transitioned_at' => now()]);

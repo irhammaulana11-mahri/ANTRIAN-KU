@@ -28,12 +28,18 @@ class SupervisorController extends Controller
         abort_unless($request->user()->can('queues.assign'), 403);
         $branchId = $request->attributes->get('branch_id');
         abort_unless($branchId, 422, 'branch_id wajib diisi oleh Super Admin.');
+        $actor = $request->user();
+        $unitId = $actor->unit_id;
 
         $queues = Queue::query()->with(['serviceType:id,service_name,queue_prefix', 'priorityType:id,priority_code,priority_name', 'activeAssignment.employee:id,employee_name', 'activeAssignment.counter:id,counter_code,counter_name'])
-            ->where('branch_id', $branchId)->whereDate('queue_date', now()->toDateString())->whereIn('status', self::ACTIVE)->orderBy('created_at')->orderBy('sequence_no')->get();
+            ->where('branch_id', $branchId)->whereDate('queue_date', now()->toDateString())->whereIn('status', self::ACTIVE)
+            ->when($unitId, fn ($q) => $q->where('unit_id', $unitId))
+            ->orderBy('created_at')->orderBy('sequence_no')->get();
 
         $activeByEmployee = QueueAssignment::query()->with('queue:id,queue_number')->where('branch_id', $branchId)->whereNull('ended_at')->get()->keyBy('employee_id');
-        $employees = Employee::query()->with(['serviceTypes:id', 'counters:id'])->where('branch_id', $branchId)->where('is_active', true)->orderBy('employee_name')->get();
+        $employees = Employee::query()->with(['serviceTypes:id', 'counters:id'])->where('branch_id', $branchId)->where('is_active', true)
+            ->when($unitId, fn ($q) => $q->where('unit_id', $unitId))
+            ->orderBy('employee_name')->get();
         $busyCounters = QueueAssignment::query()->with('employee:id,employee_name')->where('branch_id', $branchId)->whereNull('ended_at')->get()->keyBy('counter_id');
 
         return response()->json(['data' => [
@@ -63,7 +69,7 @@ class SupervisorController extends Controller
                 'counter_ids' => $employee->counters->pluck('id')->values(),
                 'active_queue_number' => $activeByEmployee->get($employee->id)?->queue?->queue_number,
             ])->values(),
-            'counters' => Counter::query()->where('branch_id', $branchId)->where('is_active', true)->orderBy('counter_code')->get(['id', 'counter_code', 'counter_name', 'counter_type'])->map(fn (Counter $counter): array => [
+            'counters' => Counter::query()->where('branch_id', $branchId)->where('is_active', true)->when($unitId, fn ($q) => $q->where('unit_id', $unitId))->orderBy('counter_code')->get(['id', 'counter_code', 'counter_name', 'counter_type'])->map(fn (Counter $counter): array => [
                 'id' => $counter->id, 'counter_code' => $counter->counter_code, 'counter_name' => $counter->counter_name, 'counter_type' => $counter->counter_type,
                 'in_use_by' => $busyCounters->get($counter->id)?->employee?->employee_name,
             ])->values(),

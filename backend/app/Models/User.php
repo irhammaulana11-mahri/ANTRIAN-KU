@@ -15,7 +15,7 @@ class User extends Authenticatable
 
     public $incrementing = false;
 
-    protected $fillable = ['id', 'branch_id', 'name', 'email', 'password'];
+    protected $fillable = ['id', 'branch_id', 'unit_id', 'name', 'email', 'password'];
 
     protected $hidden = ['password', 'remember_token'];
 
@@ -27,6 +27,11 @@ class User extends Authenticatable
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function unit()
+    {
+        return $this->belongsTo(Unit::class);
     }
 
     public function employee()

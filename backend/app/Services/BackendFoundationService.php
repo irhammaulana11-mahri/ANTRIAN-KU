@@ -33,12 +33,21 @@ class BackendFoundationService
         return $this->branches->resolve($request->user(), $explicit ?? $request->input('branch_id'));
     }
 
-    public function scope(Model $model, User $user, ?string $branchId = null)
+    public function scope(Model $model, User $user, ?string $branchId = null, ?string $unitId = null)
     {
         $query = $model->newQuery();
-        $resolved = $this->branches->resolve($user, $branchId);
+        $resolvedBranch = $this->branches->resolve($user, $branchId);
+        $resolvedUnit   = $this->branches->resolveUnit($user, $unitId);
+        $table = $model->getTable();
 
-        return $query->when($resolved !== null, fn ($q) => $q->where($model->getTable().'.branch_id', $resolved));
+        // Admin Unit: filter ke unit_id; selain itu (Super Admin, Admin Cabang): filter branch_id
+        if ($resolvedUnit !== null && \Illuminate\Support\Facades\Schema::hasColumn($table, 'unit_id')) {
+            $query->where("{$table}.unit_id", $resolvedUnit);
+        } elseif ($resolvedBranch !== null) {
+            $query->where("{$table}.branch_id", $resolvedBranch);
+        }
+
+        return $query;
     }
 
     /**
@@ -126,8 +135,14 @@ class BackendFoundationService
         return DB::transaction(function () use ($data, $branchId, $actor): Employee {
             $userId = $data['user_id'] ?? null;
 
+            $unitId = ($data['unit_id'] ?? null) ?: null;
+            // Admin Unit membuat pegawai → otomatis terikat ke unitnya sendiri
+            if ($actor->unit_id !== null) {
+                $unitId = $actor->unit_id;
+            }
+
             if ($userId === null) {
-                $user = User::create(['id' => (string) Str::uuid(), 'branch_id' => $branchId, 'name' => $data['employee_name'], 'email' => $data['email'], 'password' => $data['password']]);
+                $user = User::create(['id' => (string) Str::uuid(), 'branch_id' => $branchId, 'unit_id' => $unitId, 'name' => $data['employee_name'], 'email' => $data['email'], 'password' => $data['password']]);
                 $user->assignRole($data['role_name']);
                 $userId = $user->id;
             } else {
@@ -141,10 +156,19 @@ class BackendFoundationService
                 if (! empty($data['role_name'])) {
                     $user->syncRoles([$data['role_name']]);
                 }
+                if ($unitId !== null) {
+                    $user->update(['unit_id' => $unitId]);
+                }
             }
 
-            $employee = Employee::create(['id' => (string) Str::uuid(), 'branch_id' => $branchId, 'user_id' => $userId, 'employee_code' => $data['employee_code'], 'employee_name' => $data['employee_name'], 'is_active' => $data['is_active'] ?? true]);
-            $this->audit->recordModel('employee.created', $employee, $actor->id, null, ['employee_code' => $employee->employee_code, 'role' => $data['role_name'] ?? null]);
+            $employeeCode = $data['employee_code'] ?? null;
+            if (empty($employeeCode)) {
+                // Auto-generate: 3 huruf awal nama + 4 karakter acak, huruf besar
+                $prefix = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', substr($data['employee_name'], 0, 3)));
+                $employeeCode = ($prefix ?: 'EMP') . strtoupper(substr(str_replace('-', '', (string) Str::uuid()), 0, 4));
+            }
+            $employee = Employee::create(['id' => (string) Str::uuid(), 'branch_id' => $branchId, 'unit_id' => $unitId, 'user_id' => $userId, 'employee_code' => $employeeCode, 'employee_name' => $data['employee_name'], 'is_active' => $data['is_active'] ?? true]);
+            $this->audit->recordModel('employee.created', $employee, $actor->id, null, ['employee_code' => $employee->employee_code, 'role' => $data['role_name'] ?? null, 'unit_id' => $unitId]);
 
             return $employee;
         });
@@ -161,12 +185,22 @@ class BackendFoundationService
             if ($deactivating) {
                 $this->assertEmployeeCanLeave($locked, $actor, 'dinonaktifkan');
             }
-            $locked->update(Arr::only($data, ['employee_code', 'employee_name', 'is_active']));
+            $fields = Arr::only($data, ['employee_code', 'employee_name', 'is_active', 'unit_id']);
+            if (array_key_exists('unit_id', $fields)) {
+                $fields['unit_id'] = $fields['unit_id'] ?: null;
+            }
+            if ($actor->unit_id !== null) {
+                $fields['unit_id'] = $actor->unit_id;
+            }
+            $locked->update($fields);
 
             if ($user) {
                 $userData = array_filter(['name' => $data['employee_name'] ?? null, 'email' => $data['email'] ?? null, 'password' => $data['password'] ?? null]);
                 if ($userData !== []) {
                     $user->update($userData);
+                }
+                if ($user->unit_id !== $locked->unit_id) {
+                    $user->update(['unit_id' => $locked->unit_id]);
                 }
                 if (! empty($data['role_name']) && $data['role_name'] !== $before['role']) {
                     if ($user->id === $actor->id) {
@@ -231,6 +265,10 @@ class BackendFoundationService
 
     public function createCounter(array $data, string $branchId, User $actor): Counter
     {
+        // Admin Unit membuat loket → otomatis terikat ke unitnya
+        if ($actor->unit_id !== null) {
+            $data['unit_id'] = $actor->unit_id;
+        }
         $counter = Counter::create(array_merge(['id' => (string) Str::uuid()], $data, ['branch_id' => $branchId]));
         $this->audit->recordModel('counter.created', $counter, $actor->id, null, $counter->only(['counter_code', 'counter_name', 'counter_type']));
 
@@ -240,6 +278,9 @@ class BackendFoundationService
     public function updateCounter(Counter $counter, array $data, User $actor): Counter
     {
         unset($data['branch_id']);
+        if ($actor->unit_id !== null) {
+            $data['unit_id'] = $actor->unit_id;
+        }
         if ($this->isBeingDeactivated($counter, $data)) {
             $this->assertCounterFree($counter, 'dinonaktifkan');
         }
@@ -265,7 +306,7 @@ class BackendFoundationService
     public function createServiceType(array $data, string $branchId, User $actor): ServiceType
     {
         $service = ServiceType::create(array_merge(['id' => (string) Str::uuid()], $data, ['branch_id' => $branchId]));
-        $this->audit->recordModel('service_type.created', $service, $actor->id, null, $service->only(['service_code', 'service_name', 'queue_prefix']));
+        $this->audit->recordModel('service_type.created', $service, $actor->id, null, $service->only(['service_name', 'queue_prefix']));
 
         return $service;
     }
@@ -276,7 +317,7 @@ class BackendFoundationService
         if ($this->isBeingDeactivated($serviceType, $data)) {
             $this->assertNoActiveQueues(['service_type_id' => $serviceType->id], 'Layanan masih memiliki antrian aktif. Selesaikan atau batalkan antrian tersebut terlebih dahulu.');
         }
-        $before = $serviceType->only(['service_code', 'service_name', 'queue_prefix', 'priority_enabled', 'is_active']);
+        $before = $serviceType->only(['service_name', 'queue_prefix', 'priority_enabled', 'is_active']);
         $serviceType->update($data);
         $this->audit->recordModel('service_type.updated', $serviceType, $actor->id, $before, $serviceType->only(array_keys($before)));
 
@@ -289,7 +330,7 @@ class BackendFoundationService
             $this->assertNoActiveQueues(['service_type_id' => $serviceType->id], 'Layanan masih memiliki antrian aktif. Selesaikan atau batalkan antrian tersebut terlebih dahulu.');
             $serviceType->employees()->detach(); // petugas tidak lagi berkompetensi pada layanan yang dihapus
             $serviceType->delete();
-            $this->audit->recordModel('service_type.deleted', $serviceType, $actor->id, $serviceType->only(['service_code', 'service_name']));
+            $this->audit->recordModel('service_type.deleted', $serviceType, $actor->id, $serviceType->only(['service_name']));
         });
     }
 
@@ -329,7 +370,7 @@ class BackendFoundationService
         $this->assertTrashed($serviceType);
         $this->assertBranchAlive($serviceType);
         $serviceType->restore();
-        $this->audit->recordModel('service_type.restored', $serviceType, $actor->id, null, $serviceType->only(['service_code', 'service_name']));
+        $this->audit->recordModel('service_type.restored', $serviceType, $actor->id, null, $serviceType->only(['service_name']));
 
         return $serviceType->refresh();
     }

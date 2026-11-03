@@ -19,11 +19,19 @@ class DisplayController extends Controller
 
     public function activate(Request $request): JsonResponse
     {
-        $credential = (string) $request->validate(['credential' => ['required', 'string', 'max:200']])['credential'];
-        [$id, $secret] = array_pad(explode('.', $credential, 2), 2, '');
-        $device = preg_match('/^[0-9a-f-]{36}$/i', $id) ? DisplayDevice::query()->with('branch')->find($id) : null;
-        if (! $device || $device->isRevoked() || ! $device->branch?->is_active || ! hash_equals($device->credential_hash, hash('sha256', $secret))) {
-            return response()->json(['message' => 'Kunci pairing tidak valid atau perangkat dinonaktifkan.'], 401);
+        $credential = strtoupper(trim((string) $request->validate(['credential' => ['required', 'string', 'max:200']])['credential']));
+        // Format lama: uuid.secret (backward-compat) — format baru: 8-char activation code
+        if (str_contains($credential, '.')) {
+            [$id, $secret] = array_pad(explode('.', $credential, 2), 2, '');
+            $device = preg_match('/^[0-9a-f-]{36}$/i', $id) ? DisplayDevice::query()->with('branch')->find($id) : null;
+            if (! $device || $device->isRevoked() || ! $device->branch?->is_active || ! hash_equals($device->credential_hash, hash('sha256', $secret))) {
+                return response()->json(['message' => 'Kunci pairing tidak valid atau perangkat dinonaktifkan.'], 401);
+            }
+        } else {
+            $device = DisplayDevice::query()->with('branch')->where('activation_code', $credential)->first();
+            if (! $device || $device->isRevoked() || ! $device->branch?->is_active || ! hash_equals($device->credential_hash, hash('sha256', $credential))) {
+                return response()->json(['message' => 'Kunci pairing tidak valid atau perangkat dinonaktifkan.'], 401);
+            }
         }
 
         return $this->issueToken($device);

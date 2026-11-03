@@ -13,7 +13,7 @@ class Employee extends Model
 
     public $incrementing = false;
 
-    protected $fillable = ['id', 'branch_id', 'user_id', 'employee_code', 'employee_name', 'is_active'];
+    protected $fillable = ['id', 'branch_id', 'unit_id', 'user_id', 'employee_code', 'employee_name', 'is_active'];
 
     protected function casts(): array
     {
@@ -23,6 +23,11 @@ class Employee extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function unit()
+    {
+        return $this->belongsTo(Unit::class);
     }
 
     public function user()

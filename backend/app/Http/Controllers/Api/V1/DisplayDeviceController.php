@@ -29,23 +29,35 @@ class DisplayDeviceController extends Controller
     {
         $branchId = $this->branches->resolve($request->user(), $request->input('branch_id'));
         abort_unless($branchId, 422, 'branch_id wajib diisi oleh Super Admin.');
-        $id = (string) Str::uuid();
-        $secret = Str::random(40);
-        $device = DisplayDevice::create(['id' => $id, 'branch_id' => $branchId, 'device_code' => $request->string('device_code')->toString(), 'device_name' => $request->string('device_name')->toString(), 'device_type' => $request->input('device_type', 'DISPLAY'), 'credential_hash' => hash('sha256', $secret)]);
+        $code = $this->generateActivationCode();
+        $device = DisplayDevice::create(['id' => (string) Str::uuid(), 'branch_id' => $branchId, 'device_code' => $request->string('device_code')->toString(), 'device_name' => $request->string('device_name')->toString(), 'device_type' => $request->input('device_type', 'DISPLAY'), 'credential_hash' => hash('sha256', $code), 'activation_code' => $code]);
         $this->audit->recordModel('display_device.created', $device, $request->user()->id, null, ['device_code' => $device->device_code, 'device_type' => $device->device_type]);
 
-        return response()->json(['data' => new DisplayDeviceResource($device), 'credential' => $id.'.'.$secret, 'message' => 'Perangkat dibuat. Simpan kunci pairing ini; tidak akan ditampilkan lagi.'], 201);
+        return response()->json(['data' => new DisplayDeviceResource($device), 'credential' => $code, 'message' => 'Perangkat dibuat. Simpan kunci pairing ini; tidak akan ditampilkan lagi.'], 201);
     }
 
     public function rotate(Request $request, DisplayDevice $device): JsonResponse
     {
         $this->authorizeDevice($request, $device);
-        $secret = Str::random(40);
-        $device->forceFill(['credential_hash' => hash('sha256', $secret), 'revoked_at' => null])->save();
+        $code = $this->generateActivationCode();
+        $device->forceFill(['credential_hash' => hash('sha256', $code), 'activation_code' => $code, 'revoked_at' => null])->save();
         $device->tokens()->delete();
         $this->audit->recordModel('display_device.rotated', $device, $request->user()->id);
 
-        return response()->json(['data' => new DisplayDeviceResource($device), 'credential' => $device->id.'.'.$secret, 'message' => 'Kunci pairing baru dibuat. Perangkat lama otomatis keluar.']);
+        return response()->json(['data' => new DisplayDeviceResource($device), 'credential' => $code, 'message' => 'Kunci pairing baru dibuat. Perangkat lama otomatis keluar.']);
+    }
+
+    private function generateActivationCode(): string
+    {
+        $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // tanpa karakter ambigu (0/O, 1/I)
+        do {
+            $code = '';
+            for ($i = 0; $i < 8; $i++) {
+                $code .= $chars[random_int(0, strlen($chars) - 1)];
+            }
+        } while (DisplayDevice::query()->where('activation_code', $code)->exists());
+
+        return $code;
     }
 
     public function revoke(Request $request, DisplayDevice $device): JsonResponse
