@@ -84,8 +84,12 @@ class UnitController extends Controller
 
     public function update(UnitRequest $request, Unit $unit): UnitResource
     {
-        $this->authorize('update', $unit);
-        $unit->update($request->safe()->except('branch_id'));
+        if ($request->user()->can('update', $unit)) {
+            $unit->update($request->safe()->except('branch_id'));
+        } else {
+            $this->authorize('updateProfile', $unit);
+            $unit->update($request->safe()->only(['unit_name', 'address', 'phone']));
+        }
 
         return new UnitResource($unit->loadCount(['employees', 'counters']));
     }

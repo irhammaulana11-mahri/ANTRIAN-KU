@@ -1081,6 +1081,9 @@ paths:
       description: 'Pembaruan parsial didukung (mis. hanya `is_active`). Menonaktifkan data yang sedang dipakai ditolak 409.
 
 
+        Admin Cabang (`branches.update_own`) hanya dapat mengubah nama, alamat, dan telepon cabangnya sendiri; kode dan status diabaikan.
+
+
         **Izin:** `branches.manage`.'
       parameters:
       - name: branch
@@ -1124,6 +1127,9 @@ paths:
       summary: Ubah cabang (alias PUT)
       operationId: patchBranch
       description: 'Sama dengan PUT.
+
+
+        Admin Cabang (`branches.update_own`) hanya dapat mengubah nama, alamat, dan telepon cabangnya sendiri; kode dan status diabaikan.
 
 
         **Izin:** `branches.manage`.'
@@ -1611,7 +1617,10 @@ paths:
       - Unit
       summary: Ubah unit
       operationId: updateUnit
-      description: '**Izin:** `units.manage`.'
+      description: 'Admin Unit (`units.update_own`) hanya dapat mengubah nama, alamat, dan telepon unitnya sendiri; kode dan status diabaikan.
+
+
+        **Izin:** `units.manage`.'
       parameters:
       - name: unit
         in: path
@@ -1656,7 +1665,10 @@ paths:
       - Unit
       summary: Ubah sebagian unit
       operationId: patchUnit
-      description: '**Izin:** `units.manage`.'
+      description: 'Admin Unit (`units.update_own`) hanya dapat mengubah nama, alamat, dan telepon unitnya sendiri; kode dan status diabaikan.
+
+
+        **Izin:** `units.manage`.'
       parameters:
       - name: unit
         in: path
@@ -2979,6 +2991,19 @@ paths:
 
         **Izin:** `reports.view`.'
       parameters:
+      - name: unit_id
+        in: query
+        required: false
+        description: UUID unit, atau `none` untuk antrian cabang saja (tanpa unit). Admin Unit selalu terkunci ke unitnya.
+        schema:
+          type: string
+      - name: employee_id
+        in: query
+        required: false
+        description: Batasi laporan ke antrian yang dilayani satu petugas (harus dalam cakupan cabang/unit pemanggil).
+        schema:
+          type: string
+          format: uuid
       - name: period
         in: query
         schema:
@@ -3028,6 +3053,19 @@ paths:
 
         **Izin:** `reports.view`.'
       parameters:
+      - name: unit_id
+        in: query
+        required: false
+        description: UUID unit, atau `none` untuk antrian cabang saja (tanpa unit). Admin Unit selalu terkunci ke unitnya.
+        schema:
+          type: string
+      - name: employee_id
+        in: query
+        required: false
+        description: Batasi laporan ke antrian yang dilayani satu petugas (harus dalam cakupan cabang/unit pemanggil).
+        schema:
+          type: string
+          format: uuid
       - name: period
         in: query
         schema:

@@ -3,11 +3,13 @@
 namespace App\Services;
 
 use App\Models\AuditLog;
+use App\Models\Employee;
 use App\Models\Queue;
 use App\Models\Unit;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 
 class ReportingService
 {
@@ -17,15 +19,28 @@ class ReportingService
 
     private const CANCELLED = [Queue::CANCELLED, Queue::NO_SHOW, Queue::SKIPPED];
 
-    public function summary($user, ?string $branchId, string $period = 'today', ?string $from = null, ?string $to = null, ?string $month = null, ?string $unitId = null): array
+    public function summary($user, ?string $branchId, string $period = 'today', ?string $from = null, ?string $to = null, ?string $month = null, ?string $unitId = null, ?string $employeeId = null): array
     {
         [$start, $end] = $this->range($period, $from, $to, $month);
         $resolvedBranch = $this->branches->resolve($user, $branchId);
-        $resolvedUnit = $this->branches->resolveUnit($user, $unitId);
+        // 'none' = antrian cabang saja (unit kosong). Admin Unit selalu terkunci ke unitnya.
+        $branchOnly = $unitId === 'none' && $user->unit_id === null;
+        $resolvedUnit = $this->branches->resolveUnit($user, $unitId === 'none' ? null : $unitId);
+        if ($employeeId !== null) {
+            $allowed = Employee::query()->whereKey($employeeId)
+                ->when($resolvedBranch, fn (Builder $query) => $query->where('branch_id', $resolvedBranch))
+                ->when($resolvedUnit, fn (Builder $query) => $query->where('unit_id', $resolvedUnit))
+                ->exists();
+            if (! $allowed) {
+                throw ValidationException::withMessages(['employee_id' => 'Petugas tidak ditemukan pada cakupan laporan ini.']);
+            }
+        }
         $queues = Queue::query()->with(['serviceType', 'assignments.employee', 'assignments.counter'])
             ->whereBetween('created_at', [$start, $end])
             ->when($resolvedBranch, fn (Builder $query) => $query->where('branch_id', $resolvedBranch))
             ->when($resolvedUnit, fn (Builder $query) => $query->where('unit_id', $resolvedUnit))
+            ->when($branchOnly, fn (Builder $query) => $query->whereNull('unit_id'))
+            ->when($employeeId, fn (Builder $query) => $query->whereHas('assignments', fn (Builder $assignments) => $assignments->where('employee_id', $employeeId)))
             ->get();
         $completed = $queues->where('status', Queue::COMPLETED);
         $count = fn (Collection $items) => [
@@ -48,6 +63,8 @@ class ReportingService
             'period' => ['from' => $start->toIso8601String(), 'to' => $end->toIso8601String()],
             'branch_id' => $resolvedBranch,
             'unit_id' => $resolvedUnit,
+            'branch_only' => $branchOnly,
+            'employee_id' => $employeeId,
             'total_queues' => $queues->count(),
             'served_customers' => $completed->count(),
             'waiting_customers' => $queues->whereIn('status', self::ACTIVE)->count(),
@@ -57,7 +74,7 @@ class ReportingService
             'by_status' => collect($statuses)->map(fn (string $status) => ['status' => $status, 'total' => $queues->where('status', $status)->count()])->all(),
             'by_channel' => collect(['WALK_IN', 'ONLINE'])->map(fn (string $channel) => ['channel' => $channel, 'total' => $queues->where('registration_channel', $channel)->count()])->all(),
             'by_service' => $queues->groupBy(fn (Queue $queue) => $queue->serviceType?->service_name ?? $queue->service_type_id)->map(fn (Collection $items, string $name) => ['service_name' => $name] + $count($items))->values()->all(),
-            'by_unit' => $resolvedUnit ? [] : $queues->groupBy(fn (Queue $queue) => $queue->unit_id ?? '')->map(fn (Collection $items, string $id) => ['unit_id' => $id ?: null, 'unit_name' => $unitNames[$id] ?? 'Belum terikat unit'] + $count($items))->sortByDesc('total')->values()->all(),
+            'by_unit' => ($resolvedUnit || $branchOnly) ? [] : $queues->groupBy(fn (Queue $queue) => $queue->unit_id ?? '')->map(fn (Collection $items, string $id) => ['unit_id' => $id ?: null, 'unit_name' => $unitNames[$id] ?? 'Belum terikat unit'] + $count($items))->sortByDesc('total')->values()->all(),
             'by_hour' => collect(range(0, 23))->map(fn (int $hour) => ['hour' => $hour, 'total' => $queues->filter(fn (Queue $queue) => (int) $queue->created_at?->format('G') === $hour)->count()])->filter(fn (array $row) => $row['total'] > 0)->values()->all(),
             'daily' => $days,
             'employee_productivity' => $this->employeeProductivity($completed),

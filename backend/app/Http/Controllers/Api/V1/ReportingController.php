@@ -75,9 +75,12 @@ class ReportingController extends Controller
             'period' => ['nullable', 'in:today,month,monthly,custom'],
             'month' => ['nullable', 'required_if:period,monthly', 'date_format:Y-m'],
             'from' => ['nullable', 'date'], 'to' => ['nullable', 'date', 'after_or_equal:from'],
-            'branch_id' => ['nullable', 'uuid'], 'unit_id' => ['nullable', 'uuid'],
+            'branch_id' => ['nullable', 'uuid'],
+            // 'none' = hanya antrian cabang (tanpa unit).
+            'unit_id' => ['nullable', 'regex:/^(none|[0-9a-fA-F-]{36})$/'],
+            'employee_id' => ['nullable', 'uuid'],
         ]);
 
-        return $this->reports->summary($request->user(), $v['branch_id'] ?? null, $v['period'] ?? 'today', $v['from'] ?? null, $v['to'] ?? null, $v['month'] ?? null, $v['unit_id'] ?? null);
+        return $this->reports->summary($request->user(), $v['branch_id'] ?? null, $v['period'] ?? 'today', $v['from'] ?? null, $v['to'] ?? null, $v['month'] ?? null, $v['unit_id'] ?? null, $v['employee_id'] ?? null);
     }
 }

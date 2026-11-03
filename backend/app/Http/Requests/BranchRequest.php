@@ -9,7 +9,10 @@ class BranchRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()?->can('branches.manage') === true;
+        $user = $this->user();
+        // Pembuatan hanya oleh yang berwenang penuh; Admin Cabang boleh mengubah profil cabangnya (dibatasi di controller dan policy).
+        return $user?->can('branches.manage') === true
+            || ($user?->can('branches.update_own') === true && in_array($this->method(), ['PUT', 'PATCH'], true));
     }
 
     public function rules(): array

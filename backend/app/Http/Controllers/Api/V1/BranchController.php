@@ -51,9 +51,15 @@ class BranchController extends Controller
 
     public function update(BranchRequest $request, Branch $branch): BranchResource
     {
-        $this->authorize('update', $branch);
+        $user = $request->user();
+        if ($user->can('update', $branch)) {
+            $data = $request->validated();
+        } else {
+            $this->authorize('updateProfile', $branch);
+            $data = $request->safe()->only(['branch_name', 'address', 'phone']);
+        }
 
-        return new BranchResource($this->service->updateBranch($branch, $request->validated(), $request->user()));
+        return new BranchResource($this->service->updateBranch($branch, $data, $user));
     }
 
     public function destroy(Request $request, Branch $branch)

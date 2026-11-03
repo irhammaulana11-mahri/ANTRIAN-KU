@@ -35,6 +35,12 @@ class UnitPolicy
         return $this->create($user) && ($user->branch_id === null || $user->branch_id === $unit->branch_id);
     }
 
+    /** Admin Unit mengubah profil unitnya sendiri (nama, alamat, telepon); kode dan status hanya oleh yang berwenang penuh. */
+    public function updateProfile(User $user, Unit $unit): bool
+    {
+        return $user->can('units.update_own') && $user->unit_id !== null && $user->unit_id === $unit->id;
+    }
+
     public function delete(User $user, Unit $unit): bool
     {
         return $this->update($user, $unit);

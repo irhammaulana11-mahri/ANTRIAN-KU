@@ -275,4 +275,34 @@ class DisplayDeviceTest extends TestCase
         $this->app['auth']->forgetGuards();
         $this->postJson('/api/v1/display/activate', ['credential' => $credential])->assertUnauthorized();
     }
+
+    public function test_admin_cabang_edits_own_branch_profile_and_admin_unit_edits_own_unit_profile(): void
+    {
+        $unit = $this->unitOf($this->branch);
+        $otherUnit = \App\Models\Unit::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_code' => 'UX', 'unit_name' => 'Unit X', 'is_active' => true])->id;
+        $other = Branch::create(['id' => (string) Str::uuid(), 'branch_code' => 'DP009', 'branch_name' => 'Cabang Lain', 'is_active' => true]);
+
+        // Admin Cabang: hanya nama, alamat, telepon cabangnya; kode dan status diabaikan; cabang lain dan hapus ditolak.
+        Sanctum::actingAs($this->user('Admin Cabang'));
+        $this->putJson("/api/v1/branches/{$this->branch->id}", ['branch_code' => 'HACK', 'branch_name' => 'Nama Baru', 'address' => 'Jl. Baru 1', 'phone' => '0321', 'is_active' => false])->assertOk()->assertJsonPath('data.branch_name', 'Nama Baru');
+        $this->assertDatabaseHas('branches', ['id' => $this->branch->id, 'branch_code' => 'DP001', 'branch_name' => 'Nama Baru', 'address' => 'Jl. Baru 1', 'is_active' => true]);
+        $this->putJson("/api/v1/branches/{$other->id}", ['branch_name' => 'Curang'])->assertForbidden();
+        $this->deleteJson("/api/v1/branches/{$this->branch->id}")->assertForbidden();
+        $this->postJson('/api/v1/branches', ['branch_code' => 'NEW', 'branch_name' => 'Baru'])->assertForbidden();
+
+        // Admin Unit: hanya profil unitnya sendiri.
+        $adminUnit = $this->user('Admin Unit');
+        $adminUnit->forceFill(['unit_id' => $unit])->save();
+        Sanctum::actingAs($adminUnit);
+        $this->putJson("/api/v1/units/{$unit}", ['unit_code' => 'HACK', 'unit_name' => 'Unit Baru', 'address' => 'Jl. Unit 2', 'phone' => '0322', 'is_active' => false])->assertOk()->assertJsonPath('data.unit_name', 'Unit Baru');
+        $this->assertDatabaseHas('units', ['id' => $unit, 'unit_name' => 'Unit Baru', 'address' => 'Jl. Unit 2', 'is_active' => true]);
+        $this->assertDatabaseMissing('units', ['id' => $unit, 'unit_code' => 'HACK']);
+        $this->putJson("/api/v1/units/{$otherUnit}", ['unit_code' => 'UX', 'unit_name' => 'Curang'])->assertForbidden();
+        $this->deleteJson("/api/v1/units/{$unit}")->assertForbidden();
+        $this->putJson("/api/v1/branches/{$this->branch->id}", ['branch_name' => 'Curang'])->assertForbidden();
+
+        Sanctum::actingAs($this->user('Customer Service'));
+        $this->putJson("/api/v1/branches/{$this->branch->id}", ['branch_name' => 'Curang'])->assertForbidden();
+        $this->putJson("/api/v1/units/{$unit}", ['unit_code' => 'U1', 'unit_name' => 'Curang'])->assertForbidden();
+    }
 }

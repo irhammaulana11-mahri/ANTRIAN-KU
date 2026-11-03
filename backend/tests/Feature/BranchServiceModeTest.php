@@ -181,4 +181,44 @@ class BranchServiceModeTest extends TestCase
         $this->register($this->unitB)->assertStatus(422)->assertJsonValidationErrors('unit_id');
         $this->register($this->unitA)->assertCreated();
     }
+
+    public function test_report_filters_by_branch_only_unit_and_employee_per_role(): void
+    {
+        Sanctum::actingAs($this->user('Admin Cabang'));
+        $this->register(null)->assertCreated();
+        $this->register($this->unitA)->assertCreated();
+        $this->register($this->unitA)->assertCreated();
+        $this->register($this->unitB)->assertCreated();
+        $this->app['auth']->forgetGuards();
+        $operatorA = $this->operator($this->unitA, 'OA');
+        app(QueueDistributionEngine::class)->assignNext($this->branch->id, $this->service->id);
+        $this->app['auth']->forgetGuards();
+
+        Sanctum::actingAs($this->user('Admin Cabang'));
+        $this->getJson('/api/v1/reports/summary')->assertOk()->assertJsonPath('data.total_queues', 4);
+        $this->getJson('/api/v1/reports/summary?unit_id=none')->assertOk()->assertJsonPath('data.total_queues', 1)->assertJsonPath('data.branch_only', true);
+        $this->getJson('/api/v1/reports/summary?unit_id='.$this->unitA)->assertOk()->assertJsonPath('data.total_queues', 2);
+        $this->getJson('/api/v1/reports/summary?unit_id='.$this->unitA.'&employee_id='.$operatorA->id)->assertOk()->assertJsonPath('data.total_queues', 1);
+        $this->getJson('/api/v1/reports/summary?employee_id='.(string) Str::uuid())->assertStatus(422)->assertJsonValidationErrors('employee_id');
+        $this->get('/api/v1/reports/export?unit_id=none')->assertOk();
+
+        // Admin Unit: terkunci ke unitnya; unit lain ditolak, 'none' tidak melebarkan cakupan.
+        $adminUnit = $this->user('Admin Unit');
+        $adminUnit->forceFill(['unit_id' => $this->unitA])->save();
+        Sanctum::actingAs($adminUnit);
+        $this->getJson('/api/v1/reports/summary')->assertOk()->assertJsonPath('data.total_queues', 2);
+        $this->getJson('/api/v1/reports/summary?unit_id=none')->assertOk()->assertJsonPath('data.total_queues', 2)->assertJsonPath('data.branch_only', false);
+        $this->getJson('/api/v1/reports/summary?unit_id='.$this->unitB)->assertStatus(422);
+        $this->getJson('/api/v1/reports/summary?employee_id='.$operatorA->id)->assertOk()->assertJsonPath('data.total_queues', 1);
+        $otherUnitEmployee = Employee::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_id' => $this->unitB, 'employee_code' => 'XB', 'employee_name' => 'Unit B', 'is_active' => true]);
+        $this->getJson('/api/v1/reports/summary?employee_id='.$otherUnitEmployee->id)->assertStatus(422);
+
+        // Super Admin: cabang tertentu + unit tertentu.
+        $superAdmin = User::create(['id' => (string) Str::uuid(), 'branch_id' => null, 'name' => 'SA', 'email' => 'sa'.Str::random(5).'@example.test', 'password' => Hash::make('password123')]);
+        $superAdmin->assignRole('Super Admin');
+        Sanctum::actingAs($superAdmin);
+        $this->getJson('/api/v1/reports/summary')->assertOk()->assertJsonPath('data.total_queues', 4);
+        $this->getJson('/api/v1/reports/summary?branch_id='.$this->branch->id.'&unit_id=none')->assertOk()->assertJsonPath('data.total_queues', 1);
+        $this->getJson('/api/v1/reports/summary?branch_id='.$this->branch->id.'&unit_id='.$this->unitB)->assertOk()->assertJsonPath('data.total_queues', 1);
+    }
 }

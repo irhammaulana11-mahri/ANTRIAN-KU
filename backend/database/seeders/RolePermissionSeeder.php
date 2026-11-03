@@ -15,7 +15,7 @@ class RolePermissionSeeder extends Seeder
         // Reset cache agar syncPermissions membaca dari database, bukan cache stale
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         $permissions = [
-            'branches.view', 'branches.manage', 'units.view', 'units.manage',
+            'branches.view', 'branches.manage', 'branches.update_own', 'units.view', 'units.manage', 'units.update_own',
             'users.manage', 'employees.view', 'employees.manage',
             'services.view', 'services.manage', 'counters.view', 'counters.manage', 'queues.view',
             'queues.register', 'queues.cancel', 'queues.assign', 'queues.call', 'queues.recall',
@@ -30,7 +30,7 @@ class RolePermissionSeeder extends Seeder
         $rolePermissions = [
             'Super Admin' => $permissions,
             'Admin Cabang' => [
-                'branches.view', 'units.view', 'units.manage',
+                'branches.view', 'branches.update_own', 'units.view', 'units.manage',
                 'employees.view', 'employees.manage', 'users.manage',
                 'services.view', 'services.manage', 'counters.view', 'counters.manage',
                 'queues.view', 'queues.register', 'queues.cancel',
@@ -38,7 +38,7 @@ class RolePermissionSeeder extends Seeder
             ],
             // Admin Unit: kelola pegawai (CS/Teller), loket, dan supervisi antrian di unitnya
             'Admin Unit' => [
-                'units.view', 'employees.view', 'employees.manage', 'users.manage',
+                'units.view', 'units.update_own', 'employees.view', 'employees.manage', 'users.manage',
                 'services.view', 'counters.view', 'counters.manage',
                 'queues.view', 'queues.register', 'queues.cancel', 'queues.assign',
                 'queues.call', 'queues.recall', 'queues.start', 'queues.complete',
