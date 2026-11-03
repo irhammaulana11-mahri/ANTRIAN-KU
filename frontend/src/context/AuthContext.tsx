@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { resetEcho } from '@/lib/echo'
 import type { User } from '@/types/api'
@@ -37,6 +38,7 @@ async function refreshIfNeeded() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => { const raw = localStorage.getItem('sqms_user'); return raw ? JSON.parse(raw) : null })
   const [loading, setLoading] = useState(Boolean(localStorage.getItem('sqms_token')))
+  const queryClient = useQueryClient()
   useEffect(() => { if (!localStorage.getItem('sqms_token')) return setLoading(false); api.get<{ data: User }>('/auth/me').then(({ data }) => { setUser(data.data); localStorage.setItem('sqms_user', JSON.stringify(data.data)) }).catch(() => setUser(null)).finally(() => setLoading(false)) }, [])
 
   useEffect(() => {
@@ -51,12 +53,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const { data } = await api.post<{ data: { token: string; expires_at?: string; user: User } }>('/auth/login', { email, password, device_name: 'sqms-web' })
-    resetEcho(); saveSession(data.data.token, data.data.expires_at)
+    resetEcho(); queryClient.clear(); saveSession(data.data.token, data.data.expires_at)
     localStorage.setItem('sqms_user', JSON.stringify(data.data.user)); setUser(data.data.user)
-  }, [])
+  }, [queryClient])
   const logout = useCallback(async () => {
-    try { await api.post('/auth/logout') } finally { resetEcho(); localStorage.removeItem('sqms_token'); localStorage.removeItem('sqms_user'); localStorage.removeItem(META_KEY); setUser(null) }
-  }, [])
+    try { await api.post('/auth/logout') } finally { resetEcho(); queryClient.clear(); localStorage.removeItem('sqms_token'); localStorage.removeItem('sqms_user'); localStorage.removeItem(META_KEY); setUser(null) }
+  }, [queryClient])
   const refresh = useCallback(async () => {
     const { data } = await api.get<{ data: User }>('/auth/me')
     setUser(data.data); localStorage.setItem('sqms_user', JSON.stringify(data.data))
