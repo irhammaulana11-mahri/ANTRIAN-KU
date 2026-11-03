@@ -34,7 +34,7 @@ class AuthSecurityTest extends TestCase
         parent::tearDown();
     }
 
-    private function user(string $role = 'Supervisor'): User
+    private function user(string $role = 'Admin Unit'): User
     {
         $user = User::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'name' => 'Pengguna', 'email' => Str::random(6).'@example.test', 'password' => Hash::make('password123')]);
         $user->assignRole($role);

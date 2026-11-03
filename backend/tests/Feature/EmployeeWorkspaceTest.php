@@ -27,7 +27,7 @@ class EmployeeWorkspaceTest extends TestCase
         parent::setUp();
         $this->seed(RolePermissionSeeder::class);
         $this->branch = Branch::create(['id' => (string) Str::uuid(), 'branch_code' => 'WS001', 'branch_name' => 'Workspace Branch', 'is_active' => true]);
-        $this->service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_code' => 'CS', 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
+        $this->service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
     }
 
     private function operator(string $name, string $counterCode, ?Branch $branch = null): array
@@ -120,7 +120,7 @@ class EmployeeWorkspaceTest extends TestCase
     public function test_operator_history_is_limited_to_own_branch_and_competent_services(): void
     {
         [$user] = $this->operator('Citra', 'CS-01');
-        $tellerService = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_code' => 'TL', 'service_name' => 'Teller', 'queue_prefix' => 'TL', 'priority_enabled' => true, 'is_active' => true]);
+        $tellerService = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_name' => 'Teller', 'queue_prefix' => 'TL', 'priority_enabled' => true, 'is_active' => true]);
         $this->register('CS Customer');
         $this->postJson('/api/v1/queues/online', ['branch_id' => $this->branch->id, 'service_type_id' => $tellerService->id, 'customer_name' => 'Teller Customer'])->assertCreated();
         Sanctum::actingAs($user);

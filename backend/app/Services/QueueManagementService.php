@@ -109,8 +109,8 @@ class QueueManagementService
             if (! $actor && (! $plainToken || ! hash_equals((string) $locked->token_hash, hash('sha256', $plainToken)))) {
                 abort(403, 'Token queue tidak valid.');
             }
-            if ($actor && $actor->branch_id !== null && $actor->branch_id !== $locked->branch_id) {
-                abort(403, 'Queue bukan milik cabang Anda.');
+            if ($actor) {
+                $this->authorizeScope($locked, $actor);
             }
 
             return $this->cancelLocked($locked, $reason, $actor);
@@ -121,9 +121,7 @@ class QueueManagementService
     {
         return DB::transaction(function () use ($queue, $priorityTypeId, $actor, $reason): Queue {
             $locked = Queue::query()->whereKey($queue->id)->lockForUpdate()->firstOrFail();
-            if ($actor->branch_id !== null && $actor->branch_id !== $locked->branch_id) {
-                abort(403, 'Queue bukan milik cabang Anda.');
-            }
+            $this->authorizeScope($locked, $actor);
             $priority = PriorityType::query()->whereKey($priorityTypeId)->where('branch_id', $locked->branch_id)->where('is_active', true)->firstOrFail();
             if (in_array($locked->status, [Queue::COMPLETED, Queue::CANCELLED, Queue::SKIPPED, Queue::NO_SHOW], true)) {
                 abort(409, 'Queue sudah berstatus terminal.');
@@ -141,9 +139,7 @@ class QueueManagementService
     {
         return DB::transaction(function () use ($queue, $targetServiceTypeId, $actor, $reason): Queue {
             $locked = Queue::query()->whereKey($queue->id)->lockForUpdate()->firstOrFail();
-            if ($actor->branch_id !== null && $actor->branch_id !== $locked->branch_id) {
-                abort(403, 'Queue bukan milik cabang Anda.');
-            }
+            $this->authorizeScope($locked, $actor);
             $target = ServiceType::query()->whereKey($targetServiceTypeId)->where('branch_id', $locked->branch_id)->where('is_active', true)->firstOrFail();
             if (in_array($locked->status, [Queue::COMPLETED, Queue::CANCELLED, Queue::SKIPPED, Queue::NO_SHOW], true)) {
                 abort(409, 'Queue terminal tidak dapat ditransfer.');
@@ -169,9 +165,7 @@ class QueueManagementService
     {
         return DB::transaction(function () use ($queue, $targetStatus, $actor, $reason): Queue {
             $locked = Queue::query()->whereKey($queue->id)->lockForUpdate()->firstOrFail();
-            if ($actor->branch_id !== null && $actor->branch_id !== $locked->branch_id) {
-                abort(403, 'Queue bukan milik cabang Anda.');
-            }
+            $this->authorizeScope($locked, $actor);
             $this->authorizeOperator($locked, $actor);
             $allowed = [
                 Queue::WAITING => [Queue::CANCELLED],
@@ -318,6 +312,16 @@ class QueueManagementService
     }
 
     /** Petugas non-supervisor hanya boleh memproses antrian yang di-assign kepadanya. */
+    private function authorizeScope(Queue $queue, User $actor): void
+    {
+        if ($actor->branch_id !== null && $actor->branch_id !== $queue->branch_id) {
+            abort(403, 'Queue bukan milik cabang Anda.');
+        }
+        if ($actor->unit_id !== null && $queue->unit_id !== null && $actor->unit_id !== $queue->unit_id) {
+            abort(403, 'Queue bukan milik unit Anda.');
+        }
+    }
+
     private function authorizeOperator(Queue $queue, User $actor): void
     {
         if ($actor->can('queues.assign')) {

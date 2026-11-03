@@ -73,7 +73,7 @@ class ConcurrencyTest extends TestCase
 
     private function service(string $code = 'CS', ?string $prefix = null): ServiceType
     {
-        return ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_code' => $code, 'service_name' => 'Layanan '.$code, 'queue_prefix' => $prefix ?? $code, 'priority_enabled' => true, 'is_active' => true]);
+        return ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_name' => 'Layanan '.$code, 'queue_prefix' => $prefix ?? $code, 'priority_enabled' => true, 'is_active' => true]);
     }
 
     /** Petugas tersedia (AVAILABLE, heartbeat segar) lengkap dengan akun, kompetensi, dan loket. */
@@ -343,7 +343,7 @@ class ConcurrencyTest extends TestCase
     {
         $service = $this->service();
         [$user, $employee] = $this->employee('A', $service);
-        $user->assignRole('Supervisor'); // boleh membatalkan sebagai staf
+        $user->assignRole('Admin Unit'); // boleh membatalkan sebagai staf
         [$queueId] = $this->waitingQueues($service, 1);
         app(QueueDistributionEngine::class)->assignNext($this->branch->id, $service->id);
 

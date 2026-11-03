@@ -20,8 +20,8 @@ class QueueManagementTest extends TestCase
     private function branchWithServices(): array
     {
         $branch = Branch::create(['id' => fake()->uuid(), 'branch_code' => fake()->unique()->bothify('TST###'), 'branch_name' => 'Test Branch', 'is_active' => true]);
-        $cs = ServiceType::create(['id' => fake()->uuid(), 'branch_id' => $branch->id, 'service_code' => 'CS', 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
-        $teller = ServiceType::create(['id' => fake()->uuid(), 'branch_id' => $branch->id, 'service_code' => 'TL', 'service_name' => 'Teller', 'queue_prefix' => 'TL', 'priority_enabled' => true, 'is_active' => true]);
+        $cs = ServiceType::create(['id' => fake()->uuid(), 'branch_id' => $branch->id, 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
+        $teller = ServiceType::create(['id' => fake()->uuid(), 'branch_id' => $branch->id, 'service_name' => 'Teller', 'queue_prefix' => 'TL', 'priority_enabled' => true, 'is_active' => true]);
         PriorityType::create(['id' => fake()->uuid(), 'branch_id' => $branch->id, 'priority_code' => 'NORMAL', 'priority_name' => 'Normal', 'weight' => 0, 'aging_rate' => 1, 'aging_interval_seconds' => 300, 'verification_required' => false, 'is_active' => true]);
         PriorityType::create(['id' => fake()->uuid(), 'branch_id' => $branch->id, 'priority_code' => 'PRIORITY', 'priority_name' => 'Prioritas', 'weight' => 20, 'aging_rate' => 1, 'aging_interval_seconds' => 300, 'verification_required' => true, 'is_active' => true]);
 

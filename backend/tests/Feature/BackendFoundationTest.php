@@ -56,7 +56,7 @@ class BackendFoundationTest extends TestCase
         $user->assignRole($role);
         $role->givePermissionTo(Permission::firstOrCreate(['name' => 'services.manage', 'guard_name' => 'web'], ['id' => fake()->uuid()]));
 
-        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/service-types', ['branch_id' => $branch->id, 'service_code' => 'CS', 'service_name' => 'Customer Service', 'queue_prefix' => 'CS']);
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/service-types', ['branch_id' => $branch->id, 'service_name' => 'Customer Service', 'queue_prefix' => 'CS']);
 
         $response->assertCreated()->assertJsonPath('data.branch_id', $branch->id);
     }

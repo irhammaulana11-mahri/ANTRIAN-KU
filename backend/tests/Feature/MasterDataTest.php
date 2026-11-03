@@ -41,7 +41,7 @@ class MasterDataTest extends TestCase
 
     private function service(?Branch $branch = null, string $code = 'CS', string $prefix = 'CS'): ServiceType
     {
-        return ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => ($branch ?? $this->branch)->id, 'service_code' => $code, 'service_name' => 'Layanan '.$code, 'queue_prefix' => $prefix, 'priority_enabled' => true, 'is_active' => true]);
+        return ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => ($branch ?? $this->branch)->id, 'service_name' => 'Layanan '.$code, 'queue_prefix' => $prefix, 'priority_enabled' => true, 'is_active' => true]);
     }
 
     private function counter(?Branch $branch = null, string $code = 'CS-01'): Counter
@@ -72,15 +72,15 @@ class MasterDataTest extends TestCase
         $this->counter(code: 'CS-01');
         Employee::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'employee_code' => 'E1', 'employee_name' => 'Ada', 'is_active' => true]);
 
-        $this->postJson('/api/v1/service-types', ['service_code' => 'CS', 'service_name' => 'Baru', 'queue_prefix' => 'XX'])->assertStatus(422)->assertJsonValidationErrors('service_code');
-        $this->postJson('/api/v1/service-types', ['service_code' => 'NEW', 'service_name' => 'Baru', 'queue_prefix' => 'cs'])->assertStatus(422)->assertJsonValidationErrors('queue_prefix');
+        $this->postJson('/api/v1/service-types', ['service_name' => 'Baru', 'queue_prefix' => 'cs'])->assertStatus(422)->assertJsonValidationErrors('queue_prefix');
         $this->postJson('/api/v1/counters', ['counter_code' => 'CS-01', 'counter_name' => 'Baru', 'counter_type' => 'CS'])->assertStatus(422)->assertJsonValidationErrors('counter_code');
         $this->postJson('/api/v1/counters', ['counter_code' => 'CS-02', 'counter_name' => 'Baru', 'counter_type' => 'LAIN'])->assertStatus(422)->assertJsonValidationErrors('counter_type');
         $this->postJson('/api/v1/employees', ['employee_code' => 'E1', 'employee_name' => 'Baru', 'email' => 'baru@example.test', 'password' => 'passwordpanjang1', 'role_name' => 'Teller'])->assertStatus(422)->assertJsonValidationErrors('employee_code');
 
         // Kode yang sama boleh dipakai di cabang lain.
         Sanctum::actingAs($this->user('Admin Cabang', $this->other));
-        $this->postJson('/api/v1/counters', ['counter_code' => 'CS-01', 'counter_name' => 'Cabang Lain', 'counter_type' => 'CS'])->assertCreated();
+        $unit = \App\Models\Unit::create(['id' => (string) Str::uuid(), 'branch_id' => $this->other->id, 'unit_code' => 'U1', 'unit_name' => 'Unit Lain', 'is_active' => true]);
+        $this->postJson('/api/v1/counters', ['unit_id' => $unit->id, 'counter_code' => 'CS-01', 'counter_name' => 'Cabang Lain', 'counter_type' => 'CS'])->assertCreated();
     }
 
     public function test_editing_keeps_own_code_and_soft_deleted_codes_stay_reserved(): void
@@ -102,12 +102,12 @@ class MasterDataTest extends TestCase
         $this->service(code: 'CHARLIE', prefix: 'CH');
         $this->service($this->other, 'DELTA', 'DE');
 
-        $names = fn (string $query) => collect($this->getJson('/api/v1/service-types'.$query)->assertOk()->json('data'))->pluck('service_code')->all();
-        $this->assertSame(['ALPHA', 'BRAVO', 'CHARLIE'], $names(''));
-        $this->assertSame(['BRAVO'], $names('?q=brav'));
-        $this->assertSame(['ALPHA', 'CHARLIE'], $names('?is_active=1'));
-        $this->assertSame(['CHARLIE', 'BRAVO', 'ALPHA'], $names('?sort=service_code&direction=desc'));
-        $this->assertSame(['ALPHA', 'BRAVO', 'CHARLIE'], $names('?sort=password;drop&direction=asc'), 'kolom sort di luar whitelist diabaikan');
+        $names = fn (string $query) => collect($this->getJson('/api/v1/service-types'.$query)->assertOk()->json('data'))->pluck('queue_prefix')->all();
+        $this->assertSame(['AL', 'BR', 'CH'], $names(''));
+        $this->assertSame(['BR'], $names('?q=brav'));
+        $this->assertSame(['AL', 'CH'], $names('?is_active=1'));
+        $this->assertSame(['CH', 'BR', 'AL'], $names('?sort=queue_prefix&direction=desc'));
+        $this->assertSame(['AL', 'BR', 'CH'], $names('?sort=password;drop&direction=asc'), 'kolom sort di luar whitelist diabaikan');
         $this->assertSame([], $names('?q=%25'), 'karakter wildcard diperlakukan sebagai teks biasa');
         $this->assertSame([], $names('?q=a!b_c'), 'karakter escape tidak merusak query');
         $this->getJson('/api/v1/service-types?per_page=100000')->assertOk()->assertJsonPath('meta.per_page', 100);
@@ -153,7 +153,7 @@ class MasterDataTest extends TestCase
         $this->postJson('/api/v1/employees', $payload + ['branch_id' => $this->branch->id])->assertCreated()->assertJsonPath('data.user.roles.0', 'Admin Cabang');
 
         $own = Employee::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'user_id' => $super->id, 'employee_code' => 'SA', 'employee_name' => 'Super', 'is_active' => true]);
-        $this->putJson("/api/v1/employees/{$own->id}", ['role_name' => 'Supervisor'])->assertStatus(409);
+        $this->putJson("/api/v1/employees/{$own->id}", ['role_name' => 'Teller'])->assertStatus(409);
         $this->putJson("/api/v1/employees/{$own->id}", ['is_active' => false])->assertStatus(409);
     }
 

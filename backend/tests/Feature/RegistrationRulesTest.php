@@ -33,7 +33,7 @@ class RegistrationRulesTest extends TestCase
         // Rabu 4 November 2026, 10:00 WIB.
         Carbon::setTestNow(Carbon::parse('2026-11-04 10:00:00', config('app.timezone')));
         $this->branch = Branch::create(['id' => (string) Str::uuid(), 'branch_code' => 'RG001', 'branch_name' => 'Registration Branch', 'is_active' => true]);
-        $this->service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_code' => 'CS', 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
+        $this->service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
     }
 
     protected function tearDown(): void
@@ -151,7 +151,7 @@ class RegistrationRulesTest extends TestCase
         $second = $this->postJson('/api/v1/queues/online', $this->payload())->json('data');
         $this->postJson('/api/v1/queues/online', $this->payload(['priority_type_id' => $priority->id]))->assertStatus(422); // customer online tidak boleh klaim prioritas
         $this->postJson('/api/v1/queues/walk-in', $this->payload(['priority_type_id' => $priority->id]))->assertUnauthorized(); // walk-in tanpa login ditolak
-        $urgent = $this->walkIn($this->payload(['priority_type_id' => $priority->id]), 'Supervisor')->assertCreated()->json('data');
+        $urgent = $this->walkIn($this->payload(['priority_type_id' => $priority->id]), 'Admin Unit')->assertCreated()->json('data');
 
         $track = fn (string $token) => $this->getJson('/api/v1/queues/track/'.$token)->assertOk()->json('data');
         $this->assertSame(1, $track($urgent['token'])['position']);
@@ -210,7 +210,7 @@ class RegistrationRulesTest extends TestCase
     public function test_priority_types_endpoint_is_for_verifying_staff_only(): void
     {
         PriorityType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'priority_code' => 'NORMAL', 'priority_name' => 'Normal', 'weight' => 0, 'aging_rate' => 1, 'aging_interval_seconds' => 300, 'verification_required' => false, 'is_active' => true]);
-        Sanctum::actingAs($this->user('Supervisor'));
+        Sanctum::actingAs($this->user('Admin Unit'));
         $this->getJson('/api/v1/priority-types')->assertOk()->assertJsonPath('data.0.priority_code', 'NORMAL');
         Sanctum::actingAs($this->user('Customer Service'));
         $this->getJson('/api/v1/priority-types')->assertForbidden();

@@ -30,7 +30,7 @@ class DisplayDeviceTest extends TestCase
         $this->seed(RolePermissionSeeder::class);
         $this->branch = Branch::create(['id' => (string) Str::uuid(), 'branch_code' => 'DP001', 'branch_name' => 'Display Branch', 'is_active' => true]);
         $this->other = Branch::create(['id' => (string) Str::uuid(), 'branch_code' => 'DP002', 'branch_name' => 'Other Branch', 'is_active' => true]);
-        $this->service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_code' => 'CS', 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
+        $this->service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
     }
 
     private function user(string $role, ?Branch $branch = null): User
@@ -41,17 +41,18 @@ class DisplayDeviceTest extends TestCase
         return $user;
     }
 
-    /** @return array{0: string, 1: string} [credential, token] */
+    /** @return array{0: string, 1: string, 2: string} [credential, token, device id] */
     private function pairedDevice(?Branch $branch = null): array
     {
         $branch ??= $this->branch;
         Sanctum::actingAs($this->user('Admin Cabang', $branch));
-        $credential = $this->postJson('/api/v1/display-devices', ['device_code' => 'TV-'.Str::random(4), 'device_name' => 'TV Lobby', 'branch_id' => $branch->id])->assertCreated()->json('credential');
+        $created = $this->postJson('/api/v1/display-devices', ['device_code' => 'TV-'.Str::random(4), 'device_name' => 'TV Lobby', 'branch_id' => $branch->id])->assertCreated();
+        $credential = $created->json('credential');
         $this->app['auth']->forgetGuards();
         $token = $this->postJson('/api/v1/display/activate', ['credential' => $credential])->assertOk()->json('data.token');
         $this->app['auth']->forgetGuards();
 
-        return [$credential, $token];
+        return [$credential, $token, $created->json('data.id')];
     }
 
     public function test_admin_pairs_device_and_credential_is_not_stored_in_plain_text(): void
@@ -59,9 +60,10 @@ class DisplayDeviceTest extends TestCase
         Sanctum::actingAs($this->user('Admin Cabang'));
         $response = $this->postJson('/api/v1/display-devices', ['device_code' => 'TV-01', 'device_name' => 'TV Lobby'])->assertCreated();
         $credential = $response->json('credential');
-        $this->assertStringStartsWith($response->json('data.id').'.', $credential);
-        $this->assertStringNotContainsString('credential', json_encode($response->json('data')));
-        $this->assertDatabaseMissing('display_devices', ['credential_hash' => explode('.', $credential)[1]]);
+        $this->assertMatchesRegularExpression('/^[A-HJ-NP-Z2-9]{8}$/', $credential);
+        $this->assertStringNotContainsString($credential, json_encode($response->json('data')));
+        $this->assertDatabaseMissing('display_devices', ['credential_hash' => $credential]);
+        $this->assertDatabaseHas('display_devices', ['id' => $response->json('data.id'), 'credential_hash' => hash('sha256', $credential)]);
         $this->postJson('/api/v1/display-devices', ['device_code' => 'TV-01', 'device_name' => 'Duplikat'])->assertStatus(422);
     }
 
@@ -70,17 +72,19 @@ class DisplayDeviceTest extends TestCase
         Sanctum::actingAs($this->user('Customer Service'));
         $this->postJson('/api/v1/display-devices', ['device_code' => 'TV-X', 'device_name' => 'X'])->assertForbidden();
 
-        [$credential] = $this->pairedDevice($this->other);
-        $deviceId = explode('.', $credential)[0];
+        [, , $deviceId] = $this->pairedDevice($this->other);
         Sanctum::actingAs($this->user('Admin Cabang'));
         $this->postJson("/api/v1/display-devices/{$deviceId}/revoke")->assertForbidden();
     }
 
     public function test_activation_rejects_wrong_or_revoked_credentials(): void
     {
-        [$credential] = $this->pairedDevice();
-        [$id] = explode('.', $credential);
+        [$credential, , $id] = $this->pairedDevice();
         $this->postJson('/api/v1/display/activate', ['credential' => $id.'.salah'])->assertUnauthorized();
+        $this->postJson('/api/v1/display/activate', ['credential' => 'ZZZZZZZZ'])->assertUnauthorized();
+        $this->app['auth']->forgetGuards();
+        $this->postJson('/api/v1/display/activate', ['credential' => strtolower($credential)])->assertOk();
+        $this->app['auth']->forgetGuards();
         $this->postJson('/api/v1/display/activate', ['credential' => 'bukan-kredensial'])->assertUnauthorized();
 
         Sanctum::actingAs($this->user('Admin Cabang'));
@@ -91,14 +95,13 @@ class DisplayDeviceTest extends TestCase
 
     public function test_device_token_expires_and_is_killed_by_revoke_and_rotate(): void
     {
-        [$credential, $token] = $this->pairedDevice();
+        [, $token, $id] = $this->pairedDevice();
         $this->assertDatabaseHas('personal_access_tokens', ['name' => 'display']);
         $this->assertTrue(\App\Models\PersonalAccessToken::query()->where('name', 'display')->whereNotNull('expires_at')->exists());
 
         $this->withToken($token)->getJson('/api/v1/display/snapshot')->assertOk();
         $this->app['auth']->forgetGuards();
 
-        [$id] = explode('.', $credential);
         Sanctum::actingAs($this->user('Admin Cabang'));
         $this->postJson("/api/v1/display-devices/{$id}/rotate")->assertOk()->assertJsonStructure(['credential']);
         $this->assertDatabaseCount('personal_access_tokens', 0);
@@ -113,7 +116,7 @@ class DisplayDeviceTest extends TestCase
         $employee->serviceTypes()->attach($this->service->id);
         $employee->counters()->attach($counter->id);
         $queueId = $this->postJson('/api/v1/queues/online', ['branch_id' => $this->branch->id, 'service_type_id' => $this->service->id, 'customer_name' => 'Pelanggan Rahasia'])->json('data.queue.id');
-        $otherService = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->other->id, 'service_code' => 'CS', 'service_name' => 'CS Lain', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
+        $otherService = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->other->id, 'service_name' => 'CS Lain', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
         $this->postJson('/api/v1/queues/online', ['branch_id' => $this->other->id, 'service_type_id' => $otherService->id, 'customer_name' => 'Cabang Lain'])->assertCreated();
 
         Sanctum::actingAs($user);

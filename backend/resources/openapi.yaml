@@ -103,6 +103,68 @@ paths:
                 $ref: '#/components/schemas/User'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+  /auth/profile:
+    put:
+      tags:
+      - Auth
+      summary: Ubah nama profil
+      operationId: updateProfile
+      description: Hanya nama yang dapat diubah; email tidak dapat diganti. Perubahan tercatat di audit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                  maxLength: 150
+      responses:
+        '200':
+          description: Profil terbaru.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /auth/password:
+    put:
+      tags:
+      - Auth
+      summary: Ganti password
+      operationId: updatePassword
+      description: Wajib menyertakan password saat ini. Password baru minimal 8 karakter dan harus dikonfirmasi.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - current_password
+              - password
+              - password_confirmation
+              properties:
+                current_password:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+                password_confirmation:
+                  type: string
+      responses:
+        '200':
+          description: Password diperbarui.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /auth/refresh:
     post:
       tags:
@@ -1477,6 +1539,234 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+  /units:
+    get:
+      tags:
+      - Unit
+      summary: Daftar unit
+      operationId: listUnits
+      description: '**Izin:** `units.view`.'
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PerPage'
+      - $ref: '#/components/parameters/Q'
+      - $ref: '#/components/parameters/IsActive'
+      - $ref: '#/components/parameters/Deleted'
+      - $ref: '#/components/parameters/Direction'
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Daftar berhalaman.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Unit
+      summary: Tambah unit
+      operationId: createUnit
+      description: '**Izin:** `units.manage`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch_id:
+                  type: string
+                  format: uuid
+                  description: Wajib untuk Super Admin.
+                unit_code:
+                  type: string
+                  maxLength: 40
+                unit_name:
+                  type: string
+                  maxLength: 150
+                address:
+                  type: string
+                  nullable: true
+                phone:
+                  type: string
+                  nullable: true
+                is_active:
+                  type: boolean
+      responses:
+        '200':
+          description: Unit.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /units/dropdown:
+    get:
+      tags:
+      - Unit
+      summary: Pilihan unit aktif
+      operationId: unitDropdown
+      description: '**Izin:** `units.view`.'
+      parameters:
+      - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: Daftar ringkas unit aktif.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /units/{unit}:
+    get:
+      tags:
+      - Unit
+      summary: Detail unit
+      operationId: showUnit
+      description: '**Izin:** `units.view`.'
+      parameters:
+      - name: unit
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Unit.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags:
+      - Unit
+      summary: Ubah unit
+      operationId: updateUnit
+      description: '**Izin:** `units.manage`.'
+      parameters:
+      - name: unit
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch_id:
+                  type: string
+                  format: uuid
+                  description: Wajib untuk Super Admin.
+                unit_code:
+                  type: string
+                  maxLength: 40
+                unit_name:
+                  type: string
+                  maxLength: 150
+                address:
+                  type: string
+                  nullable: true
+                phone:
+                  type: string
+                  nullable: true
+                is_active:
+                  type: boolean
+      responses:
+        '200':
+          description: Unit.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      tags:
+      - Unit
+      summary: Ubah sebagian unit
+      operationId: patchUnit
+      description: '**Izin:** `units.manage`.'
+      parameters:
+      - name: unit
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch_id:
+                  type: string
+                  format: uuid
+                  description: Wajib untuk Super Admin.
+                unit_code:
+                  type: string
+                  maxLength: 40
+                unit_name:
+                  type: string
+                  maxLength: 150
+                address:
+                  type: string
+                  nullable: true
+                phone:
+                  type: string
+                  nullable: true
+                is_active:
+                  type: boolean
+      responses:
+        '200':
+          description: Unit.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - Unit
+      summary: Hapus unit (soft delete)
+      operationId: deleteUnit
+      description: '**Izin:** `units.manage`.'
+      parameters:
+      - name: unit
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Unit dihapus.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /units/{unit}/restore:
+    post:
+      tags:
+      - Unit
+      summary: Pulihkan unit
+      operationId: restoreUnit
+      description: '**Izin:** `units.manage`.'
+      parameters:
+      - name: unit
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Unit dipulihkan.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /counters:
     get:
       tags:

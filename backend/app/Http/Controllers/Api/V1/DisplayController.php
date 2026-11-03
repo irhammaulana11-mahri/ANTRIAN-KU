@@ -28,8 +28,8 @@ class DisplayController extends Controller
                 return response()->json(['message' => 'Kunci pairing tidak valid atau perangkat dinonaktifkan.'], 401);
             }
         } else {
-            $device = DisplayDevice::query()->with('branch')->where('activation_code', $credential)->first();
-            if (! $device || $device->isRevoked() || ! $device->branch?->is_active || ! hash_equals($device->credential_hash, hash('sha256', $credential))) {
+            $device = DisplayDevice::query()->with('branch')->where('credential_hash', hash('sha256', $credential))->first();
+            if (! $device || $device->isRevoked() || ! $device->branch?->is_active) {
                 return response()->json(['message' => 'Kunci pairing tidak valid atau perangkat dinonaktifkan.'], 401);
             }
         }

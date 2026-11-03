@@ -31,7 +31,7 @@ class KioskDeviceTest extends TestCase
         $this->seed(RolePermissionSeeder::class);
         $this->branch = Branch::create(['id' => (string) Str::uuid(), 'branch_code' => 'KS001', 'branch_name' => 'Kiosk Branch', 'is_active' => true]);
         $this->other = Branch::create(['id' => (string) Str::uuid(), 'branch_code' => 'KS002', 'branch_name' => 'Other Branch', 'is_active' => true]);
-        $this->service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_code' => 'CS', 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
+        $this->service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
     }
 
     private function user(string $role, ?Branch $branch = null): User
@@ -77,8 +77,8 @@ class KioskDeviceTest extends TestCase
 
     public function test_kiosk_config_lists_only_active_services_of_its_own_branch(): void
     {
-        $this->service->replicate()->forceFill(['id' => (string) Str::uuid(), 'service_code' => 'OLD', 'queue_prefix' => 'OL', 'is_active' => false])->save();
-        ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->other->id, 'service_code' => 'ZZ', 'service_name' => 'Cabang Lain', 'queue_prefix' => 'ZZ', 'priority_enabled' => true, 'is_active' => true]);
+        $this->service->replicate()->forceFill(['id' => (string) Str::uuid(), 'queue_prefix' => 'OL', 'is_active' => false])->save();
+        ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->other->id, 'service_name' => 'Cabang Lain', 'queue_prefix' => 'ZZ', 'priority_enabled' => true, 'is_active' => true]);
         [$token] = $this->pair('KIOSK');
 
         $config = $this->as($token, 'GET', '/api/v1/kiosk/config')->assertOk()->assertJsonPath('data.branch.branch_name', 'Kiosk Branch')->json('data');
@@ -88,7 +88,7 @@ class KioskDeviceTest extends TestCase
 
     public function test_kiosk_issues_a_ticket_in_its_own_branch_and_cannot_claim_priority_or_switch_branch(): void
     {
-        $otherService = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->other->id, 'service_code' => 'CS', 'service_name' => 'CS Lain', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
+        $otherService = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->other->id, 'service_name' => 'CS Lain', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
         [$token] = $this->pair('KIOSK');
 
         $ticket = $this->as($token, 'POST', '/api/v1/kiosk/queues', ['service_type_id' => $this->service->id, 'customer_name' => 'Budi', 'customer_phone' => '0811-222-333', 'branch_id' => $this->other->id, 'priority_type_id' => (string) Str::uuid()])

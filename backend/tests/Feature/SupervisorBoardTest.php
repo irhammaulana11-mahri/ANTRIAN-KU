@@ -42,7 +42,7 @@ class SupervisorBoardTest extends TestCase
 
     private function service(Branch $branch, string $code): ServiceType
     {
-        return ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $branch->id, 'service_code' => $code, 'service_name' => 'Layanan '.$code, 'queue_prefix' => $code, 'priority_enabled' => true, 'is_active' => true]);
+        return ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $branch->id, 'service_name' => 'Layanan '.$code, 'queue_prefix' => $code, 'priority_enabled' => true, 'is_active' => true]);
     }
 
     private function user(string $role, ?Branch $branch = null, bool $global = false): User
@@ -95,7 +95,7 @@ class SupervisorBoardTest extends TestCase
         PriorityType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'priority_code' => 'PRIORITY', 'priority_name' => 'Prioritas', 'weight' => 20, 'aging_rate' => 1, 'aging_interval_seconds' => 300, 'verification_required' => true, 'is_active' => true]);
         Queue::query()->where('customer_name', 'Sari')->update(['status' => 'COMPLETED']); // tidak aktif → tidak tampil
 
-        Sanctum::actingAs($this->user('Supervisor'));
+        Sanctum::actingAs($this->user('Admin Unit'));
         $board = $this->getJson('/api/v1/supervisor/board')->assertOk()->json('data');
 
         $this->assertSame(['Budi'], array_column($board['queues'], 'customer_name'));
@@ -122,7 +122,7 @@ class SupervisorBoardTest extends TestCase
         $queueId = $this->register($this->cs, 'Budi'); // belum ada petugas → WAITING
         [, $employee, $counter] = $this->operator('E1', $this->cs);
         [, $busy] = $this->operator('E2', $this->cs, available: false);
-        $supervisor = $this->user('Supervisor');
+        $supervisor = $this->user('Admin Unit');
         Sanctum::actingAs($supervisor);
 
         $this->postJson("/api/v1/queues/{$queueId}/assign", ['employee_id' => $busy->id, 'counter_id' => $counter->id, 'reason' => 'uji'])->assertStatus(409); // tidak tersedia
@@ -139,7 +139,7 @@ class SupervisorBoardTest extends TestCase
     {
         $queueId = $this->register($this->cs, 'Budi');
         $this->operator('T1', $this->tl); // petugas Teller tersedia
-        Sanctum::actingAs($this->user('Supervisor'));
+        Sanctum::actingAs($this->user('Admin Unit'));
 
         $this->postJson("/api/v1/queues/{$queueId}/transfer", ['target_service_type_id' => $this->tl->id])->assertStatus(422); // alasan wajib
         $response = $this->postJson("/api/v1/queues/{$queueId}/transfer", ['target_service_type_id' => $this->tl->id, 'reason' => 'Salah loket'])->assertOk();
@@ -157,7 +157,7 @@ class SupervisorBoardTest extends TestCase
         $this->postJson("/api/v1/service/{$first}/start")->assertOk();
         $this->assertSame(1, DB::table('service_sessions')->where('queue_id', $first)->whereNull('completed_at')->count());
 
-        Sanctum::actingAs($this->user('Supervisor'));
+        Sanctum::actingAs($this->user('Admin Unit'));
         $this->postJson("/api/v1/queues/{$first}/transfer", ['target_service_type_id' => $this->tl->id, 'reason' => 'Butuh Teller'])->assertOk()->assertJsonPath('data.status', 'WAITING');
 
         $session = DB::table('service_sessions')->where('queue_id', $first)->first();
@@ -174,7 +174,7 @@ class SupervisorBoardTest extends TestCase
         $foreignService = $this->service($this->other, 'ZZ');
         $foreignQueue = $this->register($foreignService, 'Orang Asing');
         $queueId = $this->register($this->cs, 'Budi');
-        Sanctum::actingAs($this->user('Supervisor'));
+        Sanctum::actingAs($this->user('Admin Unit'));
 
         $this->postJson("/api/v1/queues/{$foreignQueue}/transfer", ['target_service_type_id' => $this->tl->id, 'reason' => 'x'])->assertForbidden();
         $this->postJson("/api/v1/queues/{$queueId}/transfer", ['target_service_type_id' => $foreignService->id, 'reason' => 'x'])->assertNotFound(); // layanan cabang lain
@@ -184,11 +184,28 @@ class SupervisorBoardTest extends TestCase
         $this->postJson("/api/v1/queues/{$queueId}/transfer", ['target_service_type_id' => $this->tl->id, 'reason' => 'x'])->assertForbidden();
     }
 
+    public function test_admin_unit_cannot_touch_queue_of_another_unit_in_same_branch(): void
+    {
+        $unitA = \App\Models\Unit::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_code' => 'UA', 'unit_name' => 'Unit A', 'is_active' => true]);
+        $unitB = \App\Models\Unit::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_code' => 'UB', 'unit_name' => 'Unit B', 'is_active' => true]);
+        $queueId = $this->register($this->cs, 'Budi');
+        Queue::whereKey($queueId)->update(['unit_id' => $unitB->id]);
+
+        $admin = $this->user('Admin Unit');
+        $admin->update(['unit_id' => $unitA->id]);
+        Sanctum::actingAs($admin);
+        $this->postJson("/api/v1/queues/{$queueId}/transfer", ['target_service_type_id' => $this->tl->id, 'reason' => 'pindah unit lain'])->assertForbidden();
+        $this->assertSame($this->cs->id, Queue::find($queueId)->service_type_id);
+
+        $admin->update(['unit_id' => $unitB->id]);
+        $this->postJson("/api/v1/queues/{$queueId}/transfer", ['target_service_type_id' => $this->tl->id, 'reason' => 'unit sendiri'])->assertOk();
+    }
+
     public function test_supervisor_verifies_priority_and_the_board_reflects_it(): void
     {
         $queueId = $this->register($this->cs, 'Budi');
         $priority = PriorityType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'priority_code' => 'PRIORITY', 'priority_name' => 'Prioritas', 'weight' => 20, 'aging_rate' => 1, 'aging_interval_seconds' => 300, 'verification_required' => true, 'is_active' => true]);
-        Sanctum::actingAs($this->user('Supervisor'));
+        Sanctum::actingAs($this->user('Admin Unit'));
 
         $this->postJson("/api/v1/queues/{$queueId}/verify-priority", ['priority_type_id' => $priority->id, 'reason' => 'Lansia 70 tahun'])->assertOk();
         $row = collect($this->getJson('/api/v1/supervisor/board')->json('data.queues'))->firstWhere('id', $queueId);

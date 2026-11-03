@@ -26,7 +26,7 @@ class QueueDistributionEngineTest extends TestCase
     private function setupBranch(): array
     {
         $branch = Branch::create(['id' => (string) Str::uuid(), 'branch_code' => fake()->unique()->bothify('DST###'), 'branch_name' => 'Distribution Branch', 'is_active' => true]);
-        $service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $branch->id, 'service_code' => 'CS', 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
+        $service = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $branch->id, 'service_name' => 'Customer Service', 'queue_prefix' => 'CS', 'priority_enabled' => true, 'is_active' => true]);
         $counterOne = Counter::create(['id' => (string) Str::uuid(), 'branch_id' => $branch->id, 'counter_code' => 'CS-01', 'counter_name' => 'Loket 1', 'counter_type' => 'CS', 'is_active' => true]);
         $counterTwo = Counter::create(['id' => (string) Str::uuid(), 'branch_id' => $branch->id, 'counter_code' => 'CS-02', 'counter_name' => 'Loket 2', 'counter_type' => 'CS', 'is_active' => true]);
 
