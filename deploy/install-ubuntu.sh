@@ -135,8 +135,8 @@ if [[ "$INSTALL_CONFIGS" == "1" ]]; then
     else
         warn "Symlink Nginx site sudah ada atau source belum tersedia; dipertahankan."
     fi
-    install_config_if_absent "$PROJECT_ROOT/deploy/supervisor/antrian-worker.conf" /etc/supervisor/conf.d/antrian-worker.conf
-    install_config_if_absent "$PROJECT_ROOT/deploy/systemd/antrian-reverb.service" /etc/systemd/system/antrian-reverb.service
+    # Worker dan Reverb dikelola Supervisor (satu file). Reverb tidak lagi dipasang sebagai service systemd agar tidak bentrok di port 8080.
+    install_config_if_absent "$PROJECT_ROOT/deploy/supervisor/antrian-ku.conf" /etc/supervisor/conf.d/antrian-ku.conf
     install_config_if_absent "$PROJECT_ROOT/deploy/scripts/backup-postgres.sh" /usr/local/sbin/antrian-backup-postgres 0750
 else
     log "Penambahan konfigurasi dilewati (--skip-configs)."
@@ -154,7 +154,7 @@ if [[ "$ENABLE_SERVICES" == "1" ]]; then
     elif ! service_exists "$PHP_FPM_SERVICE" && command -v systemctl >/dev/null 2>&1; then
         PHP_FPM_SERVICE="$(systemctl list-unit-files 'php*-fpm.service' --no-legend 2>/dev/null | awk 'NR == 1 {print $1}')"
     fi
-    SERVICES=(nginx redis-server postgresql antrian-reverb)
+    SERVICES=(nginx redis-server postgresql)
     [[ -n "$PHP_FPM_SERVICE" ]] && SERVICES+=("$PHP_FPM_SERVICE")
     for service in "${SERVICES[@]}"; do
         if ! service_exists "$service"; then continue; fi
