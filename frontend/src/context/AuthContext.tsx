@@ -3,7 +3,7 @@ import { api } from '@/lib/api'
 import { resetEcho } from '@/lib/echo'
 import type { User } from '@/types/api'
 
-interface AuthContextValue { user: User | null; loading: boolean; login: (email: string, password: string) => Promise<void>; logout: () => Promise<void> }
+interface AuthContextValue { user: User | null; loading: boolean; login: (email: string, password: string) => Promise<void>; logout: () => Promise<void>; refresh: () => Promise<void> }
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 const META_KEY = 'sqms_token_meta'
@@ -57,7 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout') } finally { resetEcho(); localStorage.removeItem('sqms_token'); localStorage.removeItem('sqms_user'); localStorage.removeItem(META_KEY); setUser(null) }
   }, [])
-  const value = useMemo<AuthContextValue>(() => ({ user, loading, login, logout }), [user, loading, login, logout])
+  const refresh = useCallback(async () => {
+    const { data } = await api.get<{ data: User }>('/auth/me')
+    setUser(data.data); localStorage.setItem('sqms_user', JSON.stringify(data.data))
+  }, [])
+  const value = useMemo<AuthContextValue>(() => ({ user, loading, login, logout, refresh }), [user, loading, login, logout, refresh])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 export function useAuth() { const value = useContext(AuthContext); if (!value) throw new Error('useAuth harus digunakan di dalam AuthProvider'); return value }

@@ -12,9 +12,14 @@ export class VoiceAnnouncer {
   private context: AudioContext | null = null
   private voice: SpeechSynthesisVoice | null = null
   private settings: VoiceSettings = { rate: 1, volume: 1 }
+  /** Dipanggil dengan true saat chime+bicara dimulai, false setelah antrian bicara kosong. */
+  private activityCb: ((active: boolean) => void) | null = null
   private static readonly MAX_PENDING = 5
 
   get isEnabled() { return this.enabled }
+
+  /** Daftarkan callback untuk status berbicara (true = sedang bicara, false = selesai). Pass null untuk hapus. */
+  setActivityCallback(cb: ((active: boolean) => void) | null) { this.activityCb = cb }
 
   activate() {
     if (!this.supported) return false
@@ -29,7 +34,12 @@ export class VoiceAnnouncer {
 
   deactivate() { this.enabled = false; this.clear() }
   configure(settings: VoiceSettings) { this.settings = settings }
-  clear() { this.pending = []; if (this.supported) window.speechSynthesis.cancel(); this.speaking = false }
+  clear() {
+    this.pending = []
+    if (this.supported) window.speechSynthesis.cancel()
+    if (this.speaking) this.activityCb?.(false) // pastikan suara video pulih bila dibersihkan paksa
+    this.speaking = false
+  }
 
   /** Mengembalikan false bila pengumuman tidak dapat diputar (suara belum diaktifkan/tidak didukung). */
   enqueue(text: string, done?: () => void): boolean {
@@ -51,6 +61,7 @@ export class VoiceAnnouncer {
   private async drain() {
     if (this.speaking) return
     this.speaking = true
+    this.activityCb?.(true) // beri tahu display: bisukan video
     while (this.pending.length && this.enabled) {
       const item = this.pending.shift()!
       await this.chime()
@@ -58,6 +69,7 @@ export class VoiceAnnouncer {
       item.done?.()
     }
     this.speaking = false
+    this.activityCb?.(false) // antrian kosong: pulihkan suara video
   }
 
   private chime(): Promise<void> {

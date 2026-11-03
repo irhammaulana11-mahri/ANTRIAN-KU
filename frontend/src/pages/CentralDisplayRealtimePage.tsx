@@ -23,6 +23,8 @@ export function CentralDisplayRealtimePage() {
   const [override, setOverride] = useState<VoiceSettings | null>(loadVoiceOverride)
   const [flashKey, setFlashKey] = useState('')
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>(() => currentVoiceStatus())
+  // true saat VoiceAnnouncer sedang memutar chime/ucapan → video dibisukan sementara
+  const [mediaDucked, setMediaDucked] = useState(false)
 
   const { phase, error, snapshot, calls, connected, pair, unpair } = useDisplayFeed((call, speakable) => {
     setFlashKey(call.event_id)
@@ -35,7 +37,12 @@ export function CentralDisplayRealtimePage() {
     if (key) { window.history.replaceState(null, '', window.location.pathname); void pair(key) }
   }, [pair])
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 1000); return () => window.clearInterval(timer) }, [])
-  useEffect(() => { const announcer = voice.current; return () => announcer.clear() }, [])
+  useEffect(() => {
+    const announcer = voice.current
+    // Daftarkan callback ducking: saat pengumuman berbunyi, bisukan video; setelahnya pulihkan.
+    announcer.setActivityCallback(setMediaDucked)
+    return () => { announcer.setActivityCallback(null); announcer.clear() }
+  }, [])
   // Daftar suara dimuat asinkron; perbarui status saat berubah dan beberapa kali di awal.
   useEffect(() => {
     if (!('speechSynthesis' in window)) return
@@ -89,21 +96,49 @@ export function CentralDisplayRealtimePage() {
     {voice.current.supported && !audioOn && <button onClick={activateAudio} className="mt-4 flex items-center justify-center gap-3 rounded-2xl bg-amber-400 p-4 text-lg font-black text-slate-950"><VolumeX />Ketuk untuk mengaktifkan suara pengumuman</button>}
     {audioOn && <p className="mt-3 flex items-center gap-2 text-sm text-emerald-300"><Volume2 size={16} />Suara pengumuman aktif</p>}
 
-    <section className={`mt-4 grid gap-4 lg:min-h-0 lg:flex-1 ${media.length > 0 ? 'lg:grid-cols-[1.4fr_.6fr]' : 'lg:grid-cols-[1.5fr_.5fr]'}`}>
-      <div key={latest?.event_id} className={`flex flex-col justify-center rounded-[2rem] bg-gradient-to-br from-teal-500 to-cyan-700 p-8 shadow-2xl sm:p-12 ${flashKey && flashKey === latest?.event_id ? 'animate-pop ring-8 ring-amber-300' : ''}`}>
-        <p className="text-lg font-bold uppercase tracking-[0.25em] text-teal-50">{latest?.call_type === 'RECALL' ? 'Panggilan ulang' : 'Nomor dipanggil'}</p>
-        <p className="mt-4 text-[clamp(4.5rem,min(16vw,26vh),12rem)] font-black leading-none tracking-tight">{latest?.queue_number ?? '—'}</p>
-        <p className="mt-4 truncate pb-1 text-3xl font-semibold leading-normal sm:text-5xl">{latest?.customer_name ?? 'Menunggu panggilan berikutnya'}</p>
-        {latest && <p className="mt-4 text-2xl font-bold text-amber-200 sm:text-4xl">→ {latest.counter_name || latest.counter_code}<span className="ml-3 text-lg font-medium text-teal-50 sm:text-2xl">{latest.service_name}</span></p>}
-      </div>
-      <div className="flex flex-col gap-4 lg:min-h-0">
-      {media.length > 0 && <MediaPanel sources={media} volume={mediaVolume} />}
-      <div className="rounded-[2rem] bg-white/10 p-5 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
-        <h2 className="text-xl font-bold">Riwayat panggilan</h2>
-        <ul className="mt-4 space-y-2">{history.map((call) => <li key={call.event_id} className="rounded-2xl bg-white/10 px-4 py-3"><div className="flex items-center justify-between"><span className="text-2xl font-black text-teal-200">{call.queue_number}</span><span className="text-sm text-slate-300">{call.counter_code}</span></div><p className="truncate text-sm text-slate-400">{call.customer_name}</p></li>)}{history.length === 0 && <li className="text-slate-400">Belum ada riwayat.</li>}</ul>
-      </div>
-      </div>
-    </section>
+    {/* ── Layout utama ────────────────────────────────────────────────────────────
+         Ada video  → portrait: flex-col (video atas, info bawah 50/50)
+                      landscape lg+: flex-row (video kiri besar, info kanan)
+         Tanpa video → grid 2 kolom (nomor besar kiri, riwayat kanan)                  */}
+    {media.length > 0 ? (
+      <section className="mt-4 flex flex-col gap-4 lg:min-h-0 lg:flex-1 lg:flex-row">
+        {/* Video — portrait: aspect-video full width; landscape: isi tinggi container */}
+        <div className="aspect-video w-full overflow-hidden rounded-[1.5rem] lg:aspect-auto lg:min-h-0 lg:flex-1">
+          <MediaPanel sources={media} paused={mediaDucked} volume={mediaVolume} fill />
+        </div>
+
+        {/* Info — portrait: 2 kolom 50/50 (nomor | riwayat); landscape: kolom tunggal lebar tetap */}
+        <div className="grid grid-cols-2 gap-4 lg:flex lg:w-[340px] lg:shrink-0 lg:flex-col lg:min-h-0">
+          {/* Nomor dipanggil */}
+          <div key={latest?.event_id} className={`flex flex-col justify-center rounded-[2rem] bg-gradient-to-br from-teal-500 to-cyan-700 p-4 shadow-2xl sm:p-5 ${flashKey && flashKey === latest?.event_id ? 'animate-pop ring-8 ring-amber-300' : ''}`}>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-teal-50 sm:text-sm">{latest?.call_type === 'RECALL' ? 'Panggilan ulang' : 'Nomor dipanggil'}</p>
+            <p className="mt-2 text-[clamp(2.5rem,min(8vw,18vh),6rem)] font-black leading-none tracking-tight">{latest?.queue_number ?? '—'}</p>
+            <p className="mt-2 truncate text-base font-semibold leading-normal sm:text-xl">{latest?.customer_name ?? 'Menunggu panggilan berikutnya'}</p>
+            {latest && <p className="mt-1 truncate text-sm font-bold text-amber-200 sm:text-base">→ {latest.counter_name || latest.counter_code}<span className="ml-1 font-medium text-teal-50 text-xs sm:text-sm"> {latest.service_name}</span></p>}
+          </div>
+
+          {/* Riwayat panggilan */}
+          <div className="rounded-[2rem] bg-white/10 p-4 sm:p-5 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+            <h2 className="text-base font-bold sm:text-xl">Riwayat panggilan</h2>
+            <ul className="mt-3 space-y-2">{history.map((call) => <li key={call.event_id} className="rounded-2xl bg-white/10 px-3 py-2"><div className="flex items-center justify-between"><span className="text-xl font-black text-teal-200">{call.queue_number}</span><span className="text-xs text-slate-300">{call.counter_code}</span></div><p className="truncate text-xs text-slate-400">{call.customer_name}</p></li>)}{history.length === 0 && <li className="text-slate-400 text-sm">Belum ada riwayat.</li>}</ul>
+          </div>
+        </div>
+      </section>
+    ) : (
+      <section className="mt-4 grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[1.5fr_.5fr]">
+        {/* Layout tanpa video: nomor dipanggil besar kiri, riwayat kanan */}
+        <div key={latest?.event_id} className={`flex flex-col justify-center rounded-[2rem] bg-gradient-to-br from-teal-500 to-cyan-700 p-8 shadow-2xl sm:p-12 ${flashKey && flashKey === latest?.event_id ? 'animate-pop ring-8 ring-amber-300' : ''}`}>
+          <p className="text-lg font-bold uppercase tracking-[0.25em] text-teal-50">{latest?.call_type === 'RECALL' ? 'Panggilan ulang' : 'Nomor dipanggil'}</p>
+          <p className="mt-4 text-[clamp(4.5rem,min(16vw,26vh),12rem)] font-black leading-none tracking-tight">{latest?.queue_number ?? '—'}</p>
+          <p className="mt-4 truncate pb-1 text-3xl font-semibold leading-normal sm:text-5xl">{latest?.customer_name ?? 'Menunggu panggilan berikutnya'}</p>
+          {latest && <p className="mt-4 text-2xl font-bold text-amber-200 sm:text-4xl">→ {latest.counter_name || latest.counter_code}<span className="ml-3 text-lg font-medium text-teal-50 sm:text-2xl">{latest.service_name}</span></p>}
+        </div>
+        <div className="rounded-[2rem] bg-white/10 p-5 lg:min-h-0 lg:overflow-hidden">
+          <h2 className="text-xl font-bold">Riwayat panggilan</h2>
+          <ul className="mt-4 space-y-2">{history.map((call) => <li key={call.event_id} className="rounded-2xl bg-white/10 px-4 py-3"><div className="flex items-center justify-between"><span className="text-2xl font-black text-teal-200">{call.queue_number}</span><span className="text-sm text-slate-300">{call.counter_code}</span></div><p className="truncate text-sm text-slate-400">{call.customer_name}</p></li>)}{history.length === 0 && <li className="text-slate-400">Belum ada riwayat.</li>}</ul>
+        </div>
+      </section>
+    )}
 
     <section className="mt-4 grid gap-4 md:grid-cols-2">
       {AREAS.map((area) => {

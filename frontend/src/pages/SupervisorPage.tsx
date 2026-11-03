@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { ArrowRightLeft, BadgeCheck, UserPlus } from 'lucide-react'
 import { api, errorMessage } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
+import { useToast } from '@/context/ToastContext'
 import { PageHeader } from '@/components/PageHeader'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/Button'
 import { Field, Select } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState, ErrorState, Loading } from '@/components/Feedback'
+import { BranchGate } from '@/components/BranchGate'
 import { competentEmployees, eligibleEmployees, freeCounters, suggestedCounterId, waited } from '@/lib/supervisor'
 import type { Branch, BoardEmployee, BoardQueue, EmployeeStatus, QueueStatus, SupervisorBoard } from '@/types/api'
 
@@ -106,10 +108,10 @@ function PriorityDialog({ board, queue, onClose, onDone }: { board: SupervisorBo
 
 export function SupervisorPage() {
   const { user } = useAuth()
+  const toast = useToast()
   const isGlobal = user?.branch_id == null
   const [branchId, setBranchId] = useState(user?.branch_id ?? '')
   const [dialog, setDialog] = useState<Dialog>(null)
-  const [notice, setNotice] = useState('')
   const [filter, setFilter] = useState<QueueStatus | ''>('')
   const [now, setNow] = useState(Date.now())
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 15000); return () => window.clearInterval(timer) }, [])
@@ -123,37 +125,113 @@ export function SupervisorPage() {
   const shown = filter ? queues.filter((queue) => queue.status === filter) : queues
   const counts = (status: QueueStatus) => queues.filter((queue) => queue.status === status).length
   const employees = useMemo(() => [...(data?.employees ?? [])].sort((a, b) => EMPLOYEE_ORDER.indexOf(a.status) - EMPLOYEE_ORDER.indexOf(b.status) || a.employee_name.localeCompare(b.employee_name)), [data])
-  const done = (message: string) => { setNotice(message); setDialog(null) }
+  const done = (message: string) => { toast(message, 'success'); setDialog(null) }
 
   return <>
-    <PageHeader title="Kendali Antrian" description="Pantau antrian dan petugas secara langsung; assign manual, pindahkan antrian, dan verifikasi prioritas dengan alasan yang tercatat di audit."
-      action={isGlobal ? <Select className="w-64" value={branchId} onChange={(event) => setBranchId(event.target.value)} aria-label="Pilih cabang">{(branches.data ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_code} — {branch.branch_name}</option>)}</Select> : undefined} />
-    {notice && <div role="status" className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
-    {board.isLoading || !branchId ? <Loading /> : board.isError || !data ? <ErrorState message={errorMessage(board.error, 'Papan supervisor tidak dapat dimuat.')} /> : <div className="grid gap-6 xl:grid-cols-[1.75fr_.75fr]">
-      <Card className="min-w-0">
-        <CardHeader title="Antrian aktif hari ini" description="Diperbarui otomatis. Aksi tersedia sesuai status antrian." action={
-          <div className="flex flex-wrap gap-1.5">{(['', ...STATUS_ORDER] as const).map((status) => <button key={status || 'all'} onClick={() => setFilter(status)} className={`rounded-full px-3 py-1 text-xs font-semibold ${filter === status ? 'bg-brand text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{status ? `${QUEUE_LABEL[status]} ${counts(status)}` : `Semua ${queues.length}`}</button>)}</div>} />
-        {shown.length === 0 ? <EmptyState message="Tidak ada antrian aktif." /> : <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm">
-          <thead className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400"><tr><th className="px-3 py-3">Nomor</th><th className="px-3 py-3">Customer</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Menunggu</th><th className="px-3 py-3">Ditangani</th><th className="px-3 py-3" /></tr></thead>
-          <tbody className="divide-y divide-slate-100">{shown.map((queue) => <tr key={queue.id}>
-            <td className="px-3 py-3 align-top"><p className="font-black text-brand">{queue.queue_number}</p><p className="text-xs text-slate-500">{queue.registration_channel === 'ONLINE' ? 'Online' : 'Walk-in'}</p></td>
-            <td className="px-3 py-3 align-top"><p className="font-semibold">{queue.customer_name}</p><p className="text-xs text-slate-500">{queue.service_name}{queue.priority && queue.priority.code !== 'NORMAL' && <span className="ml-1 font-semibold text-amber-600">· {queue.priority.name}{queue.priority_verified ? ' ✓' : ''}</span>}</p></td>
-            <td className="px-3 py-3 align-top"><Badge tone={QUEUE_TONE[queue.status] ?? 'slate'}>{QUEUE_LABEL[queue.status] ?? queue.status}</Badge></td>
-            <td className="whitespace-nowrap px-3 py-3 align-top text-slate-600">{waited(queue.registered_at, now)}</td>
-            <td className="px-3 py-3 align-top text-slate-600">{queue.employee ? <><p>{queue.employee.name}</p><p className="text-xs text-slate-500">{queue.counter?.code}</p></> : '—'}</td>
-            <td className="px-3 py-3 align-top"><div className="flex justify-end gap-1.5">
-              {queue.status === 'WAITING' && <Button variant="secondary" className="whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => { setNotice(''); setDialog({ kind: 'assign', queue }) }}><UserPlus size={14} className="mr-1.5" />Assign</Button>}
-              <Button variant="secondary" className="whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => { setNotice(''); setDialog({ kind: 'transfer', queue }) }}><ArrowRightLeft size={14} className="mr-1.5" />Pindahkan</Button>
-              <Button variant="ghost" className="whitespace-nowrap px-3 py-1.5 text-xs" title="Verifikasi prioritas" aria-label={`Verifikasi prioritas ${queue.queue_number}`} onClick={() => { setNotice(''); setDialog({ kind: 'priority', queue }) }}><BadgeCheck size={15} /></Button>
-            </div></td></tr>)}</tbody></table></div>}
-      </Card>
-      <Card className="h-fit min-w-0">
-        <CardHeader title="Petugas" description={`${employees.filter((employee) => employee.is_available).length} tersedia · ${employees.filter((employee) => employee.status === 'BUSY').length} melayani`} />
-        {employees.length === 0 ? <EmptyState message="Belum ada petugas aktif." /> : <ul className="divide-y divide-slate-100">{employees.map((employee: BoardEmployee) => <li key={employee.id} className="flex items-center justify-between gap-3 py-3">
-          <div className="min-w-0"><p className="truncate font-semibold">{employee.employee_name}</p><p className="text-xs text-slate-500">{employee.employee_code}{employee.active_queue_number ? ` · menangani ${employee.active_queue_number}` : ''}{employee.service_type_ids.length === 0 || employee.counter_ids.length === 0 ? ' · belum lengkap (layanan/loket)' : ''}</p></div>
-          <Badge tone={EMPLOYEE_TONE[employee.status]}>{EMPLOYEE_LABEL[employee.status]}</Badge></li>)}</ul>}
-      </Card>
-    </div>}
+    <PageHeader title="Kendali Antrian" description={user?.unit ? `Unit: ${user.unit.unit_name} · Pantau antrian dan petugas secara langsung.` : 'Pantau antrian dan petugas secara langsung; assign manual, pindahkan antrian, dan verifikasi prioritas dengan alasan yang tercatat di audit.'}
+      action={isGlobal ? <Select className="w-64" value={branchId} onChange={(event) => setBranchId(event.target.value)} aria-label="Pilih cabang"><option value="" disabled>Pilih cabang…</option>{(branches.data ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_code} — {branch.branch_name}</option>)}</Select> : undefined} />
+    <BranchGate isGlobal={isGlobal} branchId={branchId} branches={branches}>
+      {board.isLoading ? <Loading /> : board.isError
+        ? <ErrorState message={errorMessage(board.error, 'Papan supervisor tidak dapat dimuat.')} />
+        : !data
+        ? <ErrorState message="Papan supervisor tidak dapat dimuat." />
+        : <div className="grid gap-6 xl:grid-cols-[1.75fr_.75fr]">
+            <Card className="min-w-0">
+              <CardHeader
+                title="Antrian aktif hari ini"
+                description={user?.unit ? `Unit ${user.unit.unit_name} · Diperbarui otomatis.` : 'Diperbarui otomatis setiap 6 detik.'}
+                action={
+                  <div className="flex flex-wrap gap-1">
+                    {(['', ...STATUS_ORDER] as const).map((s) => (
+                      <button key={s || 'all'} onClick={() => setFilter(s)}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${filter === s ? 'bg-brand text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                        {s ? `${QUEUE_LABEL[s]} · ${counts(s)}` : `Semua · ${queues.length}`}
+                      </button>
+                    ))}
+                  </div>
+                }
+              />
+              {shown.length === 0
+                ? <EmptyState message="Tidak ada antrian aktif." />
+                : <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-left text-sm">
+                      <thead className="border-b border-slate-100">
+                        <tr className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                          <th className="px-3 py-3">Nomor</th>
+                          <th className="px-3 py-3">Nasabah / Layanan</th>
+                          <th className="px-3 py-3">Status</th>
+                          <th className="px-3 py-3">Menunggu</th>
+                          <th className="px-3 py-3">Ditangani</th>
+                          <th className="px-3 py-3" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {shown.map((queue) => (
+                          <tr key={queue.id} className="hover:bg-slate-50/60 transition-colors">
+                            <td className="px-3 py-3.5 align-middle">
+                              <p className="font-black text-brand">{queue.queue_number}</p>
+                              <p className="text-[11px] text-slate-400">Walk-in</p>
+                            </td>
+                            <td className="px-3 py-3.5 align-middle">
+                              <p className="font-semibold text-ink">{queue.customer_name}</p>
+                              <p className="text-xs text-slate-400">
+                                {queue.service_name}
+                                {queue.priority && queue.priority.code !== 'NORMAL' && (
+                                  <span className="ml-1.5 font-semibold text-amber-600">· {queue.priority.name}{queue.priority_verified ? ' ✓' : ''}</span>
+                                )}
+                              </p>
+                            </td>
+                            <td className="px-3 py-3.5 align-middle">
+                              <Badge tone={QUEUE_TONE[queue.status] ?? 'slate'} dot>{QUEUE_LABEL[queue.status] ?? queue.status}</Badge>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3.5 align-middle text-sm tabular-nums text-slate-600">{waited(queue.registered_at, now)}</td>
+                            <td className="px-3 py-3.5 align-middle">
+                              {queue.employee
+                                ? <><p className="text-sm font-medium text-ink">{queue.employee.name}</p><p className="text-xs text-slate-400">{queue.counter?.code}</p></>
+                                : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className="px-3 py-3.5 align-middle">
+                              <div className="flex justify-end gap-1.5">
+                                {queue.status === 'WAITING' && <Button variant="secondary" className="whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => setDialog({ kind: 'assign', queue })}><UserPlus size={13} className="mr-1.5" />Assign</Button>}
+                                <Button variant="secondary" className="whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => setDialog({ kind: 'transfer', queue })}><ArrowRightLeft size={13} className="mr-1.5" />Pindah</Button>
+                                <Button variant="ghost" className="whitespace-nowrap px-2 py-1.5 text-xs text-slate-500" title="Verifikasi prioritas" aria-label={`Verifikasi prioritas ${queue.queue_number}`} onClick={() => setDialog({ kind: 'priority', queue })}><BadgeCheck size={15} /></Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </Card>
+
+            <Card className="h-fit min-w-0">
+              <CardHeader
+                title="Petugas"
+                description={`${employees.filter((e) => e.is_available).length} tersedia · ${employees.filter((e) => e.status === 'BUSY').length} melayani`}
+              />
+              {employees.length === 0
+                ? <EmptyState message="Belum ada petugas aktif." />
+                : <ul className="divide-y divide-slate-100">
+                    {employees.map((employee: BoardEmployee) => (
+                      <li key={employee.id} className="flex items-center justify-between gap-3 py-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-ink">{employee.employee_name}</p>
+                          <p className="text-xs text-slate-400">
+                            {employee.employee_code}
+                            {employee.active_queue_number ? ` · ${employee.active_queue_number}` : ''}
+                            {(employee.service_type_ids.length === 0 || employee.counter_ids.length === 0) && <span className="text-amber-500"> · belum lengkap</span>}
+                          </p>
+                        </div>
+                        <Badge tone={EMPLOYEE_TONE[employee.status]} dot>{EMPLOYEE_LABEL[employee.status]}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+              }
+            </Card>
+          </div>
+      }
+    </BranchGate>
     {data && dialog?.kind === 'assign' && <AssignDialog board={data} queue={dialog.queue} onClose={() => setDialog(null)} onDone={done} />}
     {data && dialog?.kind === 'transfer' && <TransferDialog board={data} queue={dialog.queue} onClose={() => setDialog(null)} onDone={done} />}
     {data && dialog?.kind === 'priority' && <PriorityDialog board={data} queue={dialog.queue} onClose={() => setDialog(null)} onDone={done} />}

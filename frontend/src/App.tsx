@@ -6,7 +6,7 @@ import { Loading } from '@/components/Feedback'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { MasterDataPage } from '@/pages/master/MasterDataPage'
-import { branchesConfig, countersConfig, employeesConfig, servicesConfig } from '@/pages/master/configs'
+import { branchesConfig, countersConfig, employeesConfig, servicesConfig, unitsConfig } from '@/pages/master/configs'
 import { QueueMonitoringPage } from '@/pages/QueuePages'
 import { CustomerRegistrationPage } from '@/pages/RegistrationPage'
 import { CustomerTrackingPage } from '@/pages/TrackingPage'
@@ -19,6 +19,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { can, isOperator } from '@/lib/access'
 import { CentralDisplayRealtimePage } from '@/pages/CentralDisplayRealtimePage'
 import { ReportsPage } from '@/pages/ReportsPage'
+import { ProfilePage } from '@/pages/ProfilePage'
 
 function Protected() { const { user, loading } = useAuth(); if (loading) return <Loading />; return user ? <AppLayout /> : <Navigate to="/login" replace /> }
 /** Menolak akses halaman bila user tidak punya permission; backend tetap menjadi penjaga utama. */
@@ -38,6 +39,7 @@ export function App() {
     <Route element={<Protected />}>
       <Route index element={<Home />} />
       <Route path="branches" element={<Guard permission="branches.manage"><MasterDataPage config={branchesConfig} /></Guard>} />
+      <Route path="units" element={<Guard permission="units.view"><MasterDataPage config={unitsConfig} /></Guard>} />
       <Route path="employees" element={<Guard permission="employees.view"><MasterDataPage config={employeesConfig} /></Guard>} />
       <Route path="counters" element={<Guard permission="counters.view"><MasterDataPage config={countersConfig} /></Guard>} />
       <Route path="services" element={<Guard permission="services.view"><MasterDataPage config={servicesConfig} /></Guard>} />
@@ -47,6 +49,7 @@ export function App() {
       <Route path="display-devices" element={<Guard permission="displays.manage"><DisplayDevicesPage /></Guard>} />
       <Route path="queue-settings" element={<Guard permission="settings.manage"><QueueSettingsPage /></Guard>} />
       <Route path="reports" element={<Guard permission="reports.view"><ReportsPage /></Guard>} />
+      <Route path="profile" element={<ProfilePage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>

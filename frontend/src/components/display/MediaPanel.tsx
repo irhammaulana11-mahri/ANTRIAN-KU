@@ -127,7 +127,12 @@ function SourcePlayer(props: PlayerProps) {
  * Selagi memakai sumber cadangan, sumber yang lebih prioritas dicoba lagi diam-diam tiap beberapa menit (pemutar tersembunyi, tanpa suara)
  * dan dipakai begitu tersambung. Volume media dapat diatur dari pengaturan display.
  */
-export function MediaPanel({ sources, paused = false, volume = 0.35 }: { sources: DisplayMediaSource[]; paused?: boolean; volume?: number }) {
+/**
+ * `fill` — gunakan h-full w-full (isi tinggi container) alih-alih aspect-video.
+ * Dipakai di landscape agar video tidak memaksa tinggi tetap 16:9 yang bisa melampaui layar.
+ * Parent harus memiliki tinggi yang terdefinisi (mis. flex-1 dalam flex container).
+ */
+export function MediaPanel({ sources, paused = false, volume = 0.35, fill = false }: { sources: DisplayMediaSource[]; paused?: boolean; volume?: number; fill?: boolean }) {
   const signature = useMemo(() => JSON.stringify(sources.map((source) => [source.type, source.url, source.youtube_id])), [sources])
   const [active, setActive] = useState(0)
   const [status, setStatus] = useState<'connecting' | 'playing' | 'offline'>('connecting')
@@ -158,7 +163,7 @@ export function MediaPanel({ sources, paused = false, volume = 0.35 }: { sources
 
   const source = sources[active]
   if (!source) return null
-  return <div className="relative aspect-video w-full overflow-hidden rounded-[1.5rem] bg-black shadow-xl" data-media-status={status} data-media-active={active} data-media-reason={reason}>
+  return <div className={`relative overflow-hidden rounded-[1.5rem] bg-black shadow-xl ${fill ? 'h-full w-full' : 'aspect-video w-full'}`} data-media-status={status} data-media-active={active} data-media-reason={reason}>
     {status !== 'offline' && <SourcePlayer key={`${signature}-${active}-${generation}`} source={source} paused={paused} volume={volume} onPlaying={() => { softRetries.current = 0; setStatus('playing') }} onFail={handleFail} />}
     {probe !== null && sources[probe] && <div className="pointer-events-none fixed -left-[9999px] top-0 h-[180px] w-[320px] opacity-0" aria-hidden="true">
       <SourcePlayer key={`probe-${probe}`} hidden source={sources[probe]} onFail={() => setProbe(null)} onPlaying={() => { setActive(probe); setStatus('playing'); setGeneration((value) => value + 1); setProbe(null) }} />

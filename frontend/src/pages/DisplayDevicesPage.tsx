@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Copy, KeyRound, Plus, Power, RefreshCcw, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Copy, KeyRound, Plus, Power, RefreshCcw, Trash2, X } from 'lucide-react'
 import { api, errorMessage, fieldError } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { PageHeader } from '@/components/PageHeader'
@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Select } from '@/components/ui/Field'
 import { EmptyState, ErrorState, Loading } from '@/components/Feedback'
+import { ConfirmDialog, Modal } from '@/components/ui/Modal'
+import { BranchGate } from '@/components/BranchGate'
 import { can } from '@/lib/access'
 import { formatDate } from '@/lib/utils'
 import type { Branch } from '@/types/api'
@@ -26,6 +28,8 @@ export function DisplayDevicesPage() {
   const [form, setForm] = useState({ device_code: '', device_name: '', device_type: 'DISPLAY' as 'DISPLAY' | 'KIOSK' })
   const [credential, setCredential] = useState<{ value: string; device: string; type: 'DISPLAY' | 'KIOSK' } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [confirmRotate, setConfirmRotate] = useState<Device | null>(null)
+  const [confirmRevoke, setConfirmRevoke] = useState<Device | null>(null)
 
   const branches = useQuery({ queryKey: ['branches-for-form'], enabled: isGlobal, queryFn: async () => (await api.get<{ data: Branch[] }>('/branches', { params: { per_page: 100 } })).data.data })
   useEffect(() => { if (isGlobal && !branchId && branches.data?.length) setBranchId(branches.data[0].id) }, [isGlobal, branchId, branches.data])
@@ -37,9 +41,12 @@ export function DisplayDevicesPage() {
   })
   const rotate = useMutation({
     mutationFn: async (device: Device) => ({ device, result: (await api.post<{ credential: string }>(`/display-devices/${device.id}/rotate`)).data }),
-    onSuccess: ({ device, result }) => { setCredential({ value: result.credential, device: device.device_name, type: device.device_type }); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
+    onSuccess: ({ device, result }) => { setConfirmRotate(null); setCredential({ value: result.credential, device: device.device_name, type: device.device_type }); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
   })
-  const revoke = useMutation({ mutationFn: async (device: Device) => api.post(`/display-devices/${device.id}/revoke`), onSuccess: () => void client.invalidateQueries({ queryKey: ['display-devices'] }) })
+  const revoke = useMutation({
+    mutationFn: async (device: Device) => api.post(`/display-devices/${device.id}/revoke`),
+    onSuccess: () => { setConfirmRevoke(null); void client.invalidateQueries({ queryKey: ['display-devices'] }) },
+  })
 
   const settings = useQuery({ queryKey: ['display-settings', branchId], enabled: Boolean(branchId) && can(user, 'settings.manage'), queryFn: async () => (await api.get<{ data: DisplaySettings }>('/settings/display', { params: { branch_id: branchId || undefined } })).data.data })
   const [announcement, setAnnouncement] = useState('')
@@ -49,18 +56,46 @@ export function DisplayDevicesPage() {
   const saveSettings = useMutation({ mutationFn: async () => api.put('/settings/display', { branch_id: branchId || undefined, display_announcement: announcement || null, ...voice, display_media: media.filter((row) => row.url.trim() !== '').map((row) => ({ type: row.type, label: row.label.trim() || null, url: row.url.trim() })) }), onSuccess: () => void client.invalidateQueries({ queryKey: ['display-settings'] }) })
 
   const link = credential ? `${window.location.origin}/${credential.type === 'KIOSK' ? 'kiosk' : 'display'}#key=${credential.value}` : ''
+  // Format kunci pendek: setiap 4 karakter dipisah strip untuk mudah dibaca (mis. ABCD-EFGH)
+  const keyDisplay = credential ? credential.value.match(/.{1,4}/g)?.join('-') ?? credential.value : ''
   const copy = async (text: string) => { await navigator.clipboard?.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 2000) }
 
   return <>
-    <PageHeader title="Perangkat Display & Kiosk" description="Daftarkan TV Central Display dan tablet kiosk pengambilan nomor. Setiap perangkat memakai kunci pairing sendiri dan hanya dapat mengakses data cabangnya." action={isGlobal ? <Select className="w-64" value={branchId} onChange={(event) => setBranchId(event.target.value)}>{(branches.data ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_code} — {branch.branch_name}</option>)}</Select> : undefined} />
+    <PageHeader title="Perangkat Display & Kiosk" description="Daftarkan TV Central Display dan tablet kiosk pengambilan nomor. Setiap perangkat memakai kunci pairing sendiri dan hanya dapat mengakses data cabangnya." action={isGlobal ? <Select className="w-64" value={branchId} onChange={(event) => setBranchId(event.target.value)} aria-label="Pilih cabang"><option value="" disabled>Pilih cabang…</option>{(branches.data ?? []).map((branch) => <option key={branch.id} value={branch.id}>{branch.branch_code} — {branch.branch_name}</option>)}</Select> : undefined} />
 
-    {credential && <div className="mb-6 rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-200">
-      <p className="flex items-center gap-2 font-bold text-amber-900"><KeyRound size={18} />Kunci pairing untuk &ldquo;{credential.device}&rdquo;</p>
-      <p className="mt-1 text-sm text-amber-800">Simpan sekarang — kunci ini tidak akan ditampilkan lagi. Buka tautan di bawah pada browser perangkat, atau masukkan kunci di layar aktivasi.</p>
-      <code className="mt-3 block break-all rounded-xl bg-white p-3 text-xs">{link}</code>
-      <div className="mt-3 flex gap-2"><Button variant="secondary" onClick={() => void copy(link)}><Copy size={15} className="mr-2" />{copied ? 'Tersalin' : 'Salin tautan'}</Button><Button variant="ghost" onClick={() => void copy(credential.value)}>Salin kunci saja</Button><Button variant="ghost" onClick={() => setCredential(null)}>Tutup</Button></div>
-    </div>}
+    {credential && <Modal title="" onClose={() => setCredential(null)}>
+      <div className="text-center">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-500"><KeyRound size={26} /></div>
+        <h2 className="mt-3 text-lg font-black text-ink">Kunci Pairing</h2>
+        <p className="mt-1 text-sm text-slate-500">Perangkat &ldquo;<b className="text-slate-700">{credential.device}</b>&rdquo;</p>
+        <p className="mt-1 text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">Simpan sekarang — kunci ini tidak akan ditampilkan lagi.</p>
 
+        {/* Kunci besar mudah dibaca */}
+        <div className="mt-5 rounded-2xl bg-slate-50 px-6 py-5 ring-1 ring-slate-200">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Kunci aktivasi</p>
+          <p className="text-4xl font-black tracking-[0.25em] text-brand select-all">{keyDisplay}</p>
+          <p className="mt-2 text-xs text-slate-400">Masukkan kode ini di layar aktivasi perangkat</p>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <button type="button" onClick={() => void copy(credential.value)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-700 transition-colors">
+            {copied ? <><Check size={15} />Tersalin</> : <><Copy size={15} />Salin kunci</>}
+          </button>
+          <button type="button" onClick={() => void copy(link)} className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+            <Copy size={15} />Salin tautan lengkap
+          </button>
+          <div className="mt-1 rounded-xl bg-slate-50 p-2.5 text-left">
+            <p className="text-xs text-slate-400 mb-1">Tautan langsung</p>
+            <code className="break-all text-xs text-slate-500">{link}</code>
+          </div>
+          <button type="button" onClick={() => setCredential(null)} className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-500 hover:bg-slate-50 transition-colors">
+            <X size={15} />Tutup
+          </button>
+        </div>
+      </div>
+    </Modal>}
+
+    <BranchGate isGlobal={isGlobal} branchId={branchId} branches={branches}>
     <div className="grid gap-6 xl:grid-cols-[1.4fr_.6fr]">
       <Card>
         <CardHeader title="Daftar perangkat" description="Status online berdasarkan aktivitas terakhir (2 menit)." />
@@ -71,10 +106,9 @@ export function DisplayDevicesPage() {
               <td className="px-3 py-4">{device.revoked_at ? <Badge tone="red">Dinonaktifkan</Badge> : device.is_online ? <Badge tone="green">Online</Badge> : <Badge>Offline</Badge>}</td>
               <td className="whitespace-nowrap px-3 py-4 text-slate-500">{formatDate(device.last_seen_at)}</td>
               <td className="px-3 py-4"><div className="flex justify-end gap-2">
-                <Button variant="secondary" className="whitespace-nowrap px-3 py-1.5 text-xs" disabled={rotate.isPending} onClick={() => window.confirm(`Buat kunci baru untuk ${device.device_name}? Perangkat yang sedang tersambung akan keluar.`) && rotate.mutate(device)}><RefreshCcw size={14} className="mr-1.5" />{device.revoked_at ? 'Aktifkan ulang' : 'Kunci baru'}</Button>
-                {!device.revoked_at && <Button variant="ghost" className="whitespace-nowrap px-3 py-1.5 text-xs text-red-600 hover:bg-red-50" disabled={revoke.isPending} onClick={() => window.confirm(`Nonaktifkan ${device.device_name}?`) && revoke.mutate(device)}><Power size={14} className="mr-1.5" />Nonaktifkan</Button>}
+                <Button variant="secondary" className="whitespace-nowrap px-3 py-1.5 text-xs" disabled={rotate.isPending} onClick={() => setConfirmRotate(device)}><RefreshCcw size={14} className="mr-1.5" />{device.revoked_at ? 'Aktifkan ulang' : 'Kunci baru'}</Button>
+                {!device.revoked_at && <Button variant="ghost" className="whitespace-nowrap px-3 py-1.5 text-xs text-red-600 hover:bg-red-50" disabled={revoke.isPending} onClick={() => setConfirmRevoke(device)}><Power size={14} className="mr-1.5" />Nonaktifkan</Button>}
               </div></td></tr>)}</tbody></table></div>}
-        {(rotate.isError || revoke.isError) && <p className="mt-3 text-sm text-red-600">{errorMessage(rotate.error ?? revoke.error)}</p>}
       </Card>
 
       <div className="space-y-6">
@@ -123,5 +157,29 @@ export function DisplayDevicesPage() {
         </Card>}
       </div>
     </div>
+    </BranchGate>
+
+    {confirmRotate && <ConfirmDialog
+      title={confirmRotate.revoked_at ? 'Aktifkan ulang perangkat?' : 'Buat kunci baru?'}
+      message={confirmRotate.revoked_at
+        ? `Perangkat "${confirmRotate.device_name}" akan diaktifkan kembali dengan kunci baru. Simpan kunci yang muncul setelahnya.`
+        : `Kunci pairing "${confirmRotate.device_name}" akan diperbarui. Perangkat yang sedang tersambung akan otomatis keluar dan perlu dipasangkan ulang.`}
+      confirmLabel={confirmRotate.revoked_at ? 'Aktifkan ulang' : 'Buat kunci baru'}
+      onConfirm={() => rotate.mutate(confirmRotate)}
+      onCancel={() => setConfirmRotate(null)}
+      busy={rotate.isPending}
+      error={rotate.isError ? errorMessage(rotate.error) : undefined}
+    />}
+
+    {confirmRevoke && <ConfirmDialog
+      title="Nonaktifkan perangkat?"
+      message={`Perangkat "${confirmRevoke.device_name}" tidak dapat mengakses sistem setelah dinonaktifkan. Anda dapat mengaktifkannya kembali kapan saja.`}
+      confirmLabel="Nonaktifkan"
+      danger
+      onConfirm={() => revoke.mutate(confirmRevoke)}
+      onCancel={() => setConfirmRevoke(null)}
+      busy={revoke.isPending}
+      error={revoke.isError ? errorMessage(revoke.error) : undefined}
+    />}
   </>
 }

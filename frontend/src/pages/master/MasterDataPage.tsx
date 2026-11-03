@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
+import { useToast } from '@/context/ToastContext'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useForm, type FieldValues } from 'react-hook-form'
+import { useForm, Controller, type FieldValues } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Pencil, Plus, Power, RotateCcw, Search, Trash2 } from 'lucide-react'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -12,18 +13,20 @@ import { PageHeader } from '@/components/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Select } from '@/components/ui/Field'
+import { Combobox } from '@/components/ui/Combobox'
 import { ConfirmDialog, Modal } from '@/components/ui/Modal'
 import { DataTable, Pagination, type PageMeta, type SortState } from '@/components/DataTable'
 import { EmptyState, ErrorState, Loading } from '@/components/Feedback'
-import type { Branch } from '@/types/api'
-import type { Ctx, FieldDef, MasterConfig, MasterRow } from './types'
+import type { Branch, Unit } from '@/types/api'
+import type { Ctx, CtxWithUnits, FieldDef, MasterConfig, MasterRow } from './types'
 
 interface Listing<T> { data: T[]; meta: PageMeta }
 
 function FormDialog<T extends MasterRow>({ config, ctx, row, onClose, onSaved }: { config: MasterConfig<T>; ctx: Ctx; row: T | null; onClose: () => void; onSaved: (message: string) => void }) {
   const editing = row !== null
-  const fields = config.fields(ctx).filter((field) => (editing ? !field.createOnly : !field.editOnly))
-  const { register, handleSubmit, setError, formState: { errors } } = useForm<FieldValues>({
+  const isSelf = editing && row.user_id != null && row.user_id === ctx.user?.id
+  const fields = config.fields(ctx).filter((field) => (editing ? !field.createOnly : !field.editOnly)).filter((field) => !(field.hiddenWhenSelf && isSelf))
+  const { register, control, handleSubmit, setError, formState: { errors } } = useForm<FieldValues>({
     resolver: zodResolver(config.schema(editing, ctx)),
     defaultValues: editing ? config.toForm(row) : config.defaults(ctx),
   })
@@ -48,6 +51,14 @@ function FormDialog<T extends MasterRow>({ config, ctx, row, onClose, onSaved }:
     if (field.type === 'checkbox') {
       return <label key={field.name} className="flex items-start gap-3 rounded-xl bg-slate-50 p-3 text-sm"><input type="checkbox" className="mt-0.5" {...register(field.name)} /><span><b>{field.label}</b>{field.hint && <span className="block text-xs text-slate-500">{field.hint}</span>}</span></label>
     }
+    if (field.type === 'combobox') {
+      return <Field key={field.name} label={field.label} error={error}>
+        <Controller name={field.name} control={control} render={({ field: ctrl }) => (
+          <Combobox value={ctrl.value as string ?? ''} onChange={ctrl.onChange} options={field.options ?? []} placeholder={field.placeholder ?? 'Pilih…'} allowEmpty={field.allowEmpty ?? true} />
+        )} />
+        {field.hint && !error && <span className="block text-xs text-slate-400">{field.hint}</span>}
+      </Field>
+    }
     return <Field key={field.name} label={field.label} error={error}>
       {field.type === 'select' ? <Select {...register(field.name)}><option value="">Pilih…</option>{field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
         : field.type === 'textarea' ? <textarea {...register(field.name)} rows={3} className="w-full rounded-xl border-0 bg-slate-50 px-3.5 py-2.5 text-sm ring-1 ring-slate-200 focus:bg-white focus:ring-2 focus:ring-brand" />
@@ -68,6 +79,7 @@ function FormDialog<T extends MasterRow>({ config, ctx, row, onClose, onSaved }:
 export function MasterDataPage<T extends MasterRow>({ config }: { config: MasterConfig<T> }) {
   const { user } = useAuth()
   const client = useQueryClient()
+  const toast = useToast()
   const canManage = can(user, config.managePermission)
   const isGlobal = user?.branch_id == null
 
@@ -80,11 +92,12 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
   const [sort, setSort] = useState<SortState>({ key: config.defaultSort, direction: 'asc' })
   const [form, setForm] = useState<{ row: T | null } | null>(null)
   const [confirm, setConfirm] = useState<{ kind: 'toggle' | 'delete' | 'restore'; row: T } | null>(null)
-  const [notice, setNotice] = useState('')
   const q = useDebounced(search.trim())
 
   const branches = useQuery({ queryKey: ['branches-lookup'], enabled: isGlobal || config.branchScoped, staleTime: 60_000, queryFn: async () => (await api.get<{ data: Branch[] }>('/branches', { params: { per_page: 100 } })).data.data })
-  const ctx = useMemo<Ctx>(() => ({ user, isGlobal, branches: branches.data ?? [], branchName: (id) => (branches.data ?? []).find((branch) => branch.id === id)?.branch_name ?? '—' }), [user, isGlobal, branches.data])
+  // Muat daftar unit untuk dropdown field unit_id (loket & petugas). Hanya pada halaman branch-scoped agar tidak memuat ganda.
+  const units = useQuery({ queryKey: ['units-dropdown'], enabled: config.branchScoped && can(user, 'units.view'), staleTime: 60_000, queryFn: async () => (await api.get<{ data: Unit[] }>('/units/dropdown')).data.data })
+  const ctx = useMemo<CtxWithUnits>(() => ({ user, isGlobal, branches: branches.data ?? [], units: units.data ?? [], branchName: (id) => (branches.data ?? []).find((branch) => branch.id === id)?.branch_name ?? '—' }), [user, isGlobal, branches.data, units.data])
 
   const params = { q: q || undefined, is_active: status === 'deleted' ? undefined : status || undefined, deleted: status === 'deleted' ? 1 : undefined, branch_id: (isGlobal && config.branchScoped ? branchFilter : '') || undefined, sort: sort.key, direction: sort.direction, page, per_page: perPage, ...Object.fromEntries(Object.entries(extra).filter(([, value]) => value)) }
   const list = useQuery({ queryKey: [config.key, params], placeholderData: keepPreviousData, queryFn: async () => (await api.get<Listing<T>>(config.path, { params })).data })
@@ -99,9 +112,11 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
     onSuccess: (action) => {
       void client.invalidateQueries({ queryKey: [config.key] })
       const label = `${config.singular} "${config.rowName(action.row)}"`
-      setNotice(action.kind === 'delete' ? `${label} dihapus. Data dapat dipulihkan dari filter "Dihapus".` : action.kind === 'restore' ? `${label} dipulihkan.${config.restoreNote ? ` ${config.restoreNote}` : ''}` : `${label} ${action.row.is_active ? 'dinonaktifkan' : 'diaktifkan'}.`)
+      const msg = action.kind === 'delete' ? `${label} dihapus.` : action.kind === 'restore' ? `${label} dipulihkan.${config.restoreNote ? ` ${config.restoreNote}` : ''}` : `${label} ${action.row.is_active ? 'dinonaktifkan' : 'diaktifkan'}.`
+      toast(msg, action.kind === 'delete' ? 'warning' : 'success')
       setConfirm(null)
     },
+    onError: (error) => { toast(errorMessage(error, 'Tindakan gagal dilakukan.'), 'error') },
   })
 
   const changeFilter = (apply: () => void) => { apply(); setPage(1) }
@@ -111,7 +126,7 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
       <Button variant="secondary" onClick={() => { mutate.reset(); setConfirm({ kind: 'restore', row: row.original }) }}><RotateCcw size={15} className="mr-2" />Pulihkan</Button>
     </div> : canManage ? <div className="flex justify-end gap-1">
       {config.extraActions?.(row.original, (target) => setForm({ row: target }))}
-      <Button variant="ghost" aria-label={`Ubah ${config.rowName(row.original)}`} title="Ubah" onClick={() => { setNotice(''); setForm({ row: row.original }) }}><Pencil size={16} /></Button>
+      <Button variant="ghost" aria-label={`Ubah ${config.rowName(row.original)}`} title="Ubah" onClick={() => setForm({ row: row.original })}><Pencil size={16} /></Button>
       <Button variant="ghost" aria-label={row.original.is_active ? 'Nonaktifkan' : 'Aktifkan'} title={row.original.is_active ? 'Nonaktifkan' : 'Aktifkan'} onClick={() => { mutate.reset(); setConfirm({ kind: 'toggle', row: row.original }) }}><Power size={16} className={row.original.is_active ? 'text-emerald-600' : 'text-slate-400'} /></Button>
       <Button variant="ghost" aria-label={`Hapus ${config.rowName(row.original)}`} title="Hapus" onClick={() => { mutate.reset(); setConfirm({ kind: 'delete', row: row.original }) }}><Trash2 size={16} className="text-red-500" /></Button>
     </div> : null,
@@ -121,8 +136,7 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
   const toggleSort = (key: string) => setSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }))
 
   return <>
-    <PageHeader title={config.title} description={config.description} action={canManage ? <Button onClick={() => { setNotice(''); setForm({ row: null }) }}><Plus size={17} className="mr-2" />Tambah {config.singular.toLowerCase()}</Button> : undefined} />
-    {notice && <div role="status" className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
+    <PageHeader title={config.title} description={config.description} action={canManage ? <Button onClick={() => setForm({ row: null })}><Plus size={17} className="mr-2" />Tambah {config.singular.toLowerCase()}</Button> : undefined} />
     <Card>
       <div className="mb-5 flex flex-wrap items-end gap-3">
         <div className="relative min-w-56 flex-1"><Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input value={search} onChange={(event) => changeFilter(() => setSearch(event.target.value))} placeholder={config.searchPlaceholder} className="pl-9" aria-label="Cari" /></div>
@@ -137,7 +151,7 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
         </div>}
     </Card>
 
-    {form && <FormDialog config={config} ctx={ctx} row={form.row} onClose={() => setForm(null)} onSaved={(message) => { setNotice(message); setForm(null) }} />}
+    {form && <FormDialog config={config} ctx={ctx} row={form.row} onClose={() => setForm(null)} onSaved={(message) => { toast(message, 'success'); setForm(null) }} />}
     {confirm && <ConfirmDialog
       title={confirm.kind === 'restore' ? `Pulihkan ${config.singular.toLowerCase()}?` : confirm.kind === 'delete' ? `Hapus ${config.singular.toLowerCase()}?` : confirm.row.is_active ? `Nonaktifkan ${config.singular.toLowerCase()}?` : `Aktifkan ${config.singular.toLowerCase()}?`}
       danger={confirm.kind === 'delete' || (confirm.kind === 'toggle' && confirm.row.is_active)}
