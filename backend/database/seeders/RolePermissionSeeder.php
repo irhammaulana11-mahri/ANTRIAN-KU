@@ -6,11 +6,14 @@ use App\Models\Permission;
 use App\Models\Role;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
+use Spatie\Permission\PermissionRegistrar;
 
 class RolePermissionSeeder extends Seeder
 {
     public function run(): void
     {
+        // Reset cache agar syncPermissions membaca dari database, bukan cache stale
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
         $permissions = [
             'branches.view', 'branches.manage', 'units.view', 'units.manage',
             'users.manage', 'employees.view', 'employees.manage',
