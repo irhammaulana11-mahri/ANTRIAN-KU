@@ -127,6 +127,16 @@ export function CustomerRegistrationPage() {
   const trackUrl = ticket ? `${window.location.origin}/tracking#token=${ticket.token}` : ''
   const copy = async () => { await navigator.clipboard?.writeText(trackUrl); setCopied(true); window.setTimeout(() => setCopied(false), 2000) }
 
+  // Pendaftaran hanya lewat kiosk di kantor atau petugas; pengunjung tanpa login tidak diberi formulir yang pasti ditolak.
+  if (!user) return <PublicShell>
+    <h1 className="flex items-center gap-3 text-2xl font-black sm:text-3xl"><Ticket className="text-brand" />Ambil Nomor Antrian</h1>
+    <Card className="mt-6 text-center">
+      <p className="text-lg font-bold text-ink">Pendaftaran dilakukan di kantor</p>
+      <p className="mt-2 text-sm text-slate-500">Silakan ambil nomor antrian melalui tablet kiosk atau petugas loket di kantor. Setelah mendapat nomor, Anda dapat memantau antrian lewat halaman pelacakan.</p>
+      <Link to="/tracking" className="mt-5 inline-block rounded-xl bg-brand px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-700">Lacak antrian saya</Link>
+    </Card>
+  </PublicShell>
+
   if (ticket) return <PublicShell>
     <Card className="print-ticket text-center">
       <p className="text-sm font-semibold text-slate-500">{ticket.unit || ticket.branch}</p>
