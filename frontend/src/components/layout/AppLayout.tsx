@@ -31,7 +31,7 @@ const navGroups: NavGroup[] = [
   {
     heading: 'Master Data',
     items: [
-      { to: '/branches', label: 'Cabang', icon: Building2, show: (u) => can(u, 'branches.manage') },
+      { to: '/branches', label: 'Cabang', icon: Building2, show: (u) => can(u, 'branches.view') },
       { to: '/units', label: 'Unit', icon: Landmark, show: (u) => can(u, 'units.view') },
       { to: '/employees', label: 'Petugas', icon: Users, show: (u) => can(u, 'employees.view') },
       { to: '/counters', label: 'Loket', icon: WalletCards, show: (u) => can(u, 'counters.view') },

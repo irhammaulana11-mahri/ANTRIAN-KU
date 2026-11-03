@@ -11,10 +11,14 @@ interface Props {
   placeholder?: string
   emptyLabel?: string
   allowEmpty?: boolean
+  /** Teks pilihan kosong, mis. nama cabang bila kosong berarti milik cabang. */
+  emptyOptionLabel?: string
+  /** Sisi tempat daftar pilihan menempel; 'right' untuk filter di tepi kanan layar agar daftar tidak terpotong. */
+  menuAlign?: 'left' | 'right'
   disabled?: boolean
 }
 
-export function Combobox({ value, onChange, options, placeholder = 'Pilih…', emptyLabel = 'Tidak ada pilihan yang cocok.', allowEmpty = true, disabled }: Props) {
+export function Combobox({ value, onChange, options, placeholder = 'Pilih…', emptyLabel = 'Tidak ada pilihan yang cocok.', allowEmpty = true, emptyOptionLabel = 'Tidak terikat unit', menuAlign = 'left', disabled }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
@@ -76,9 +80,9 @@ export function Combobox({ value, onChange, options, placeholder = 'Pilih…', e
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute z-50 mt-1.5 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+        <div className={cn('absolute z-50 mt-1.5 w-max min-w-full max-w-[min(26rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl', menuAlign === 'right' ? 'right-0' : 'left-0')}>
           {/* Search */}
-          <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-3.5 py-3">
             <Search size={13} className="shrink-0 text-slate-400" />
             <input
               ref={inputRef}
@@ -91,14 +95,14 @@ export function Combobox({ value, onChange, options, placeholder = 'Pilih…', e
           </div>
 
           {/* Options */}
-          <ul className="max-h-52 overflow-y-auto py-1" role="listbox">
+          <ul className="max-h-80 overflow-y-auto py-1.5" role="listbox">
             {/* Empty option — hanya tampil jika allowEmpty */}
             {allowEmpty && (
               <li>
                 <button type="button" onClick={() => { onChange(''); setOpen(false) }}
                   className={cn('flex w-full items-center gap-2 px-3.5 py-2 text-left text-sm text-slate-400 hover:bg-slate-50', !value && 'bg-slate-50')}>
                   <span className="w-4" />
-                  <span className="italic">— Tidak terikat unit —</span>
+                  <span className="italic">— {emptyOptionLabel} —</span>
                 </button>
               </li>
             )}
@@ -115,7 +119,7 @@ export function Combobox({ value, onChange, options, placeholder = 'Pilih…', e
                     <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                       {opt.value === value && <Check size={13} className="text-teal-600" strokeWidth={2.5} />}
                     </span>
-                    <span className="flex-1 truncate">
+                    <span className="flex-1 break-words">
                       <span className={cn('font-medium', opt.value === value ? 'text-teal-700' : 'text-slate-700')}>{opt.label}</span>
                       {opt.sublabel && <span className="ml-1.5 text-xs text-slate-400">{opt.sublabel}</span>}
                     </span>

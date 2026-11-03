@@ -22,10 +22,10 @@ import type { Ctx, CtxWithUnits, FieldDef, MasterConfig, MasterRow } from './typ
 
 interface Listing<T> { data: T[]; meta: PageMeta }
 
-function FormDialog<T extends MasterRow>({ config, ctx, row, onClose, onSaved }: { config: MasterConfig<T>; ctx: Ctx; row: T | null; onClose: () => void; onSaved: (message: string) => void }) {
+function FormDialog<T extends MasterRow>({ config, ctx, row, limited, onClose, onSaved }: { config: MasterConfig<T>; ctx: Ctx; row: T | null; limited: boolean; onClose: () => void; onSaved: (message: string) => void }) {
   const editing = row !== null
   const isSelf = editing && row.user_id != null && row.user_id === ctx.user?.id
-  const fields = config.fields(ctx).filter((field) => (editing ? !field.createOnly : !field.editOnly)).filter((field) => !(field.hiddenWhenSelf && isSelf))
+  const fields = config.fields(ctx).filter((field) => (editing ? !field.createOnly : !field.editOnly)).filter((field) => !(field.hiddenWhenSelf && isSelf)).filter((field) => !(limited && field.manageOnly))
   const { register, control, handleSubmit, setError, formState: { errors } } = useForm<FieldValues>({
     resolver: zodResolver(config.schema(editing, ctx)),
     defaultValues: editing ? config.toForm(row) : config.defaults(ctx),
@@ -54,7 +54,7 @@ function FormDialog<T extends MasterRow>({ config, ctx, row, onClose, onSaved }:
     if (field.type === 'combobox') {
       return <Field key={field.name} label={field.label} error={error}>
         <Controller name={field.name} control={control} render={({ field: ctrl }) => (
-          <Combobox value={ctrl.value as string ?? ''} onChange={ctrl.onChange} options={field.options ?? []} placeholder={field.placeholder ?? 'Pilih…'} allowEmpty={field.allowEmpty ?? true} />
+          <Combobox value={ctrl.value as string ?? ''} onChange={ctrl.onChange} options={field.options ?? []} placeholder={field.placeholder ?? 'Pilih…'} allowEmpty={field.allowEmpty ?? true} emptyOptionLabel={field.emptyOptionLabel} />
         )} />
         {field.hint && !error && <span className="block text-xs text-slate-400">{field.hint}</span>}
       </Field>
@@ -81,6 +81,8 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
   const client = useQueryClient()
   const toast = useToast()
   const canManage = can(user, config.managePermission)
+  // Tanpa izin kelola penuh, pengguna masih boleh mengubah profil cabang/unitnya sendiri (nama, alamat, telepon).
+  const ownEdit = !canManage && Boolean(config.ownEditPermission) && can(user, config.ownEditPermission ?? '')
   const isGlobal = user?.branch_id == null
 
   const [search, setSearch] = useState('')
@@ -129,9 +131,11 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
       <Button variant="ghost" aria-label={`Ubah ${config.rowName(row.original)}`} title="Ubah" onClick={() => setForm({ row: row.original })}><Pencil size={16} /></Button>
       <Button variant="ghost" aria-label={row.original.is_active ? 'Nonaktifkan' : 'Aktifkan'} title={row.original.is_active ? 'Nonaktifkan' : 'Aktifkan'} onClick={() => { mutate.reset(); setConfirm({ kind: 'toggle', row: row.original }) }}><Power size={16} className={row.original.is_active ? 'text-emerald-600' : 'text-slate-400'} /></Button>
       <Button variant="ghost" aria-label={`Hapus ${config.rowName(row.original)}`} title="Hapus" onClick={() => { mutate.reset(); setConfirm({ kind: 'delete', row: row.original }) }}><Trash2 size={16} className="text-red-500" /></Button>
+    </div> : ownEdit && config.isOwnRow?.(row.original, user) ? <div className="flex justify-end">
+      <Button variant="ghost" aria-label={`Ubah ${config.rowName(row.original)}`} title="Ubah profil" onClick={() => setForm({ row: row.original })}><Pencil size={16} /></Button>
     </div> : null,
   }
-  const columns = useMemo(() => [...config.columns(ctx), ...(canManage ? [actionColumn] : [])], [config, ctx, canManage]) // eslint-disable-line react-hooks/exhaustive-deps
+  const columns = useMemo(() => [...config.columns(ctx), ...(canManage || ownEdit ? [actionColumn] : [])], [config, ctx, canManage, ownEdit, user]) // eslint-disable-line react-hooks/exhaustive-deps
   const filters = config.filters?.(ctx) ?? []
   const toggleSort = (key: string) => setSort((current) => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }))
 
@@ -151,7 +155,7 @@ export function MasterDataPage<T extends MasterRow>({ config }: { config: Master
         </div>}
     </Card>
 
-    {form && <FormDialog config={config} ctx={ctx} row={form.row} onClose={() => setForm(null)} onSaved={(message) => { toast(message, 'success'); setForm(null) }} />}
+    {form && <FormDialog config={config} ctx={ctx} row={form.row} limited={ownEdit} onClose={() => setForm(null)} onSaved={(message) => { toast(message, 'success'); setForm(null) }} />}
     {confirm && <ConfirmDialog
       title={confirm.kind === 'restore' ? `Pulihkan ${config.singular.toLowerCase()}?` : confirm.kind === 'delete' ? `Hapus ${config.singular.toLowerCase()}?` : confirm.row.is_active ? `Nonaktifkan ${config.singular.toLowerCase()}?` : `Aktifkan ${config.singular.toLowerCase()}?`}
       danger={confirm.kind === 'delete' || (confirm.kind === 'toggle' && confirm.row.is_active)}

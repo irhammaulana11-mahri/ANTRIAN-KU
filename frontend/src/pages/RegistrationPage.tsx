@@ -173,7 +173,7 @@ export function CustomerRegistrationPage() {
           {needsUnitPick && <Field label="Unit" error={errors.unit_id?.message}>
             {units.isLoading ? <Select disabled><option>Memuat unit…</option></Select>
               : <Select {...register('unit_id')}>
-                  <option value="">{units.data?.meta?.branch_serves_directly === false ? 'Pilih unit' : 'Cabang (layanan langsung)'}</option>
+                  <option value="">{units.data?.meta?.branch_serves_directly === false ? 'Pilih unit' : (user?.branch?.branch_name ?? 'Cabang')}</option>
                   {(units.data?.data ?? []).map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name} ({unit.unit_code})</option>)}
                 </Select>}
           </Field>}

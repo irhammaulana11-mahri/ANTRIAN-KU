@@ -9,7 +9,8 @@ import { PageHeader } from '@/components/PageHeader'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { StatCard } from '@/components/StatCard'
 import { ErrorState, Loading } from '@/components/Feedback'
-import type { Unit } from '@/types/api'
+import { Combobox } from '@/components/ui/Combobox'
+import type { Branch, Employee, Unit } from '@/types/api'
 
 type Counts = { total: number; served: number; cancelled: number; active: number }
 type Report = {
@@ -67,12 +68,34 @@ export function ReportsPage() {
   const { user } = useAuth()
   const [period, setPeriod] = useState<Period>('today')
   const [month, setMonth] = useState(thisMonth())
+  const [branchId, setBranchId] = useState('')
   const [unitId, setUnitId] = useState('')
+  const [employeeId, setEmployeeId] = useState('')
   const [exporting, setExporting] = useState(false)
-  const canPickUnit = user?.unit_id == null && can(user, 'units.view')
+  const isGlobal = user?.branch_id == null
+  const hasOwnUnit = user?.unit_id != null
+  const canPickUnit = !hasOwnUnit && can(user, 'units.view')
 
-  const units = useQuery({ queryKey: ['units-dropdown'], enabled: canPickUnit, staleTime: 60_000, queryFn: async () => (await api.get<{ data: Unit[] }>('/units/dropdown')).data.data })
-  const params = { period, month: period === 'monthly' ? month : undefined, unit_id: unitId || undefined }
+  const branches = useQuery({ queryKey: ['reports-branches', user?.id], enabled: isGlobal, staleTime: 60_000, queryFn: async () => (await api.get<{ data: Branch[] }>('/branches', { params: { per_page: 100 } })).data.data })
+  const units = useQuery({ queryKey: ['reports-units', user?.id, branchId], enabled: canPickUnit, staleTime: 60_000, queryFn: async () => (await api.get<{ data: Unit[]; meta?: { branch_serves_directly: boolean } }>('/units/dropdown', { params: { branch_id: isGlobal ? branchId || undefined : undefined } })).data })
+  const unitList = units.data?.data ?? []
+  // Antrian cabang (tanpa unit) hanya ada bila cabang membuka layanan langsung.
+  const servesDirectly = units.data?.meta?.branch_serves_directly ?? true
+  const selectedUnit = unitList.find((unit) => unit.id === unitId)
+  const scopeUnitId = hasOwnUnit ? user?.unit_id ?? '' : unitId !== 'none' ? unitId : ''
+  // Filter petugas muncul bila cakupan sudah satu unit (Admin Unit otomatis).
+  const employees = useQuery({
+    queryKey: ['reports-employees', user?.id, scopeUnitId], enabled: Boolean(scopeUnitId), staleTime: 60_000,
+    queryFn: async () => (await api.get<{ data: Employee[] }>('/employees', { params: { per_page: 100, branch_id: isGlobal ? selectedUnit?.branch_id : undefined } })).data.data,
+  })
+  const branchName = isGlobal ? (branches.data ?? []).find((branch) => branch.id === branchId)?.branch_name : user?.branch?.branch_name
+  const branchOptions = (branches.data ?? []).map((branch) => ({ value: branch.id, label: branch.branch_name, sublabel: branch.branch_code }))
+  const unitOptions = [
+    ...(branchName && servesDirectly ? [{ value: 'none', label: `${branchName} (cabang saja)` }] : []),
+    ...unitList.filter((unit) => !isGlobal || !branchId || unit.branch_id === branchId).map((unit) => ({ value: unit.id, label: unit.unit_name, sublabel: isGlobal && !branchId ? (branches.data ?? []).find((branch) => branch.id === unit.branch_id)?.branch_name ?? unit.unit_code : unit.unit_code })),
+  ]
+  const employeeOptions = (employees.data ?? []).filter((employee) => employee.unit_id === scopeUnitId).map((employee) => ({ value: employee.id, label: employee.employee_name, sublabel: employee.employee_code }))
+  const params = { period, month: period === 'monthly' ? month : undefined, branch_id: isGlobal ? branchId || undefined : undefined, unit_id: hasOwnUnit ? undefined : unitId || undefined, employee_id: employeeId || undefined }
   const query = useQuery({ queryKey: ['reports-summary', params], queryFn: () => getData<Report>('/reports/summary', params) })
   const report = query.data?.data
 
@@ -96,7 +119,10 @@ export function ReportsPage() {
   return <>
     <PageHeader title="Laporan" description={report ? `Periode ${formatDate(report.period.from)}${period === 'today' ? '' : ` – ${formatDate(report.period.to)}`}${user?.unit ? ` · ${user.unit.unit_name}` : ''}` : 'Rekap aktivitas antrian sesuai wilayah akun Anda.'}
       action={<div className="flex flex-wrap items-center gap-2">
-        {canPickUnit && (units.data?.length ?? 0) > 0 && <select className={control} value={unitId} onChange={(e) => setUnitId(e.target.value)} aria-label="Filter unit"><option value="">Semua unit</option>{units.data?.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name}</option>)}</select>}
+        {isGlobal && <div className="w-52"><Combobox value={branchId} onChange={(value) => { setBranchId(value); setUnitId(''); setEmployeeId('') }} options={branchOptions} placeholder="Semua cabang" emptyOptionLabel="Semua cabang" menuAlign="right" /></div>}
+        {canPickUnit && <div className="w-56"><Combobox value={unitId} onChange={(value) => { setUnitId(value); setEmployeeId('') }} options={unitOptions} placeholder="Semua unit" emptyOptionLabel="Semua unit" menuAlign="right" /></div>}
+        {hasOwnUnit && <span className="rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">{user?.unit?.unit_name ?? 'Unit saya'}</span>}
+        {Boolean(scopeUnitId) && <div className="w-52"><Combobox value={employeeId} onChange={setEmployeeId} options={employeeOptions} placeholder="Semua petugas" emptyOptionLabel="Semua petugas" menuAlign="right" /></div>}
         <select className={control} value={period} onChange={(e) => setPeriod(e.target.value as Period)} aria-label="Periode"><option value="today">Hari ini</option><option value="month">Bulan ini</option><option value="monthly">Pilih bulan…</option></select>
         {period === 'monthly' && <input type="month" className={control.replace('pr-9', 'pr-3')} value={month} max={thisMonth()} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Bulan" />}
         <button className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-60" disabled={exporting || !report} onClick={() => void exportReport()}><Download size={15} />{exporting ? 'Menyiapkan…' : 'Export CSV'}</button>

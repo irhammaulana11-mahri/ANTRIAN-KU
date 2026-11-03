@@ -23,16 +23,18 @@ const unitField = (ctx: CtxWithUnits): FieldDef[] => {
   if ((ctx.units?.length ?? 0) === 0) return []      // tidak ada unit: sembunyikan
   // Kosong = milik cabang; hanya boleh bila cabang membuka layanan langsung (atau Super Admin lintas cabang).
   const allowEmpty = ctx.user?.branch_id == null || ctx.servesDirectly
-  return [{ name: 'unit_id', label: 'Unit', type: 'combobox', allowEmpty, options: ctx.units.map((unit) => ({ value: unit.id, label: unit.unit_name, sublabel: unit.unit_code })) }]
+  // Kosong berarti milik cabang: tampilkan nama cabang pengguna (Super Admin lintas cabang: teks umum).
+  const emptyOptionLabel = ctx.user?.branch?.branch_name ?? 'Milik cabang (tanpa unit)'
+  return [{ name: 'unit_id', label: 'Unit', type: 'combobox', allowEmpty, emptyOptionLabel, options: ctx.units.map((unit) => ({ value: unit.id, label: unit.unit_name, sublabel: unit.unit_code })) }]
 }
 /** Layanan boleh dikosongkan unitnya = berlaku untuk semua unit. Admin Unit tidak mengelola layanan. */
-const serviceUnitField = (ctx: CtxWithUnits): FieldDef[] => (ctx.units?.length ?? 0) === 0 ? [] : [{ name: 'unit_id', label: 'Berlaku untuk unit', type: 'combobox', allowEmpty: true, hint: 'Kosongkan agar layanan tersedia di semua unit.', options: ctx.units.map((unit) => ({ value: unit.id, label: unit.unit_name, sublabel: unit.unit_code })) }]
+const serviceUnitField = (ctx: CtxWithUnits): FieldDef[] => (ctx.units?.length ?? 0) === 0 ? [] : [{ name: 'unit_id', label: 'Berlaku untuk unit', type: 'combobox', allowEmpty: true, emptyOptionLabel: 'Semua unit', hint: 'Kosongkan agar layanan tersedia di semua unit.', options: ctx.units.map((unit) => ({ value: unit.id, label: unit.unit_name, sublabel: unit.unit_code })) }]
 const activeBadge = (row: { is_active: boolean; deleted_at?: string | null }) => row.deleted_at ? <Badge tone="red">Dihapus</Badge> : <Badge tone={row.is_active ? 'green' : 'slate'}>{row.is_active ? 'Aktif' : 'Nonaktif'}</Badge>
 const identity = (title: string, subtitle?: string | null) => <><p className="font-bold">{title}</p>{subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}</>
 
 export const unitsConfig: MasterConfig<Unit> = {
   key: 'units', title: 'Manajemen Unit', description: 'Kelola unit pelayanan (ULP, Rayon, dll.) di bawah cabang. Loket, petugas, dan perangkat kiosk dapat dikaitkan ke unit tertentu.',
-  path: '/units', singular: 'Unit', managePermission: 'units.manage', searchPlaceholder: 'Cari kode atau nama unit…',
+  path: '/units', singular: 'Unit', managePermission: 'units.manage', ownEditPermission: 'units.update_own', isOwnRow: (row, user) => row.id === user?.unit_id, searchPlaceholder: 'Cari kode atau nama unit…',
   sortable: ['unit_code', 'unit_name', 'is_active', 'created_at'], defaultSort: 'unit_name', branchScoped: true,
   rowName: (row) => row.unit_name,
   deleteNote: 'Unit hanya dapat dihapus bila tidak memiliki petugas atau loket aktif. Pindahkan atau hapus terlebih dahulu.',
@@ -45,11 +47,11 @@ export const unitsConfig: MasterConfig<Unit> = {
   ],
   fields: (ctx) => [
     ...branchField(ctx),
-    { name: 'unit_code', label: 'Kode unit', placeholder: 'mis. ULP-JBG', uppercase: true },
+    { name: 'unit_code', label: 'Kode unit', placeholder: 'mis. ULP-JBG', uppercase: true, manageOnly: true },
     { name: 'unit_name', label: 'Nama unit', placeholder: 'mis. ULP Jombang' },
     { name: 'address', label: 'Alamat', type: 'textarea' },
     { name: 'phone', label: 'Telepon' },
-    { name: 'is_active', label: 'Unit aktif', type: 'checkbox', editOnly: true },
+    { name: 'is_active', label: 'Unit aktif', type: 'checkbox', editOnly: true, manageOnly: true },
   ],
   schema: (editing, ctx) => z.object({ ...branchSchema(ctx, editing), unit_code: code('Kode unit', 40), unit_name: name('Nama unit'), address: z.string().max(500).optional(), phone: z.string().max(40).optional(), is_active: z.boolean() }),
   defaults: (ctx) => ({ ...defaultBranch(ctx), unit_code: '', unit_name: '', address: '', phone: '', is_active: true }),
@@ -58,7 +60,7 @@ export const unitsConfig: MasterConfig<Unit> = {
 
 export const branchesConfig: MasterConfig<Branch> = {
   key: 'branches', title: 'Manajemen Cabang', description: 'Kelola cabang organisasi. Cabang baru otomatis mendapat pengaturan antrian dan kategori prioritas standar.',
-  path: '/branches', singular: 'Cabang', managePermission: 'branches.manage', searchPlaceholder: 'Cari kode, nama, atau alamat cabang…',
+  path: '/branches', singular: 'Cabang', managePermission: 'branches.manage', ownEditPermission: 'branches.update_own', isOwnRow: (row, user) => row.id === user?.branch_id, searchPlaceholder: 'Cari kode, nama, atau alamat cabang…',
   sortable: ['branch_code', 'branch_name', 'is_active', 'created_at'], defaultSort: 'branch_name', branchScoped: false,
   rowName: (row) => row.branch_name,
   deleteNote: 'Cabang hanya dapat dihapus bila tidak lagi memiliki petugas, loket, layanan, atau antrian aktif. Gunakan "Nonaktifkan" bila ingin menutup sementara.',
@@ -69,11 +71,11 @@ export const branchesConfig: MasterConfig<Branch> = {
     { id: 'status', header: 'Status', meta: { sortKey: 'is_active' }, cell: ({ row }) => activeBadge(row.original) },
   ],
   fields: () => [
-    { name: 'branch_code', label: 'Kode cabang', placeholder: 'mis. 51453', uppercase: true },
+    { name: 'branch_code', label: 'Kode cabang', placeholder: 'mis. 51453', uppercase: true, manageOnly: true },
     { name: 'branch_name', label: 'Nama cabang' },
     { name: 'address', label: 'Alamat', type: 'textarea' },
     { name: 'phone', label: 'Telepon' },
-    { name: 'is_active', label: 'Cabang aktif', type: 'checkbox', editOnly: true, hint: 'Cabang nonaktif tidak dapat dipakai untuk pendaftaran antrian.' },
+    { name: 'is_active', label: 'Cabang aktif', type: 'checkbox', editOnly: true, manageOnly: true, hint: 'Cabang nonaktif tidak dapat dipakai untuk pendaftaran antrian.' },
   ],
   schema: () => z.object({ branch_code: code('Kode cabang', 30), branch_name: name('Nama cabang'), address: z.string().max(500).optional(), phone: z.string().max(40).optional(), is_active: z.boolean() }),
   defaults: () => ({ branch_code: '', branch_name: '', address: '', phone: '', is_active: true }),

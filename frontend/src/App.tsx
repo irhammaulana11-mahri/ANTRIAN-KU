@@ -38,7 +38,7 @@ export function App() {
     <Route path="/tracking" element={<CustomerTrackingPage />} />
     <Route element={<Protected />}>
       <Route index element={<Home />} />
-      <Route path="branches" element={<Guard permission="branches.manage"><MasterDataPage config={branchesConfig} /></Guard>} />
+      <Route path="branches" element={<Guard permission="branches.view"><MasterDataPage config={branchesConfig} /></Guard>} />
       <Route path="units" element={<Guard permission="units.view"><MasterDataPage config={unitsConfig} /></Guard>} />
       <Route path="employees" element={<Guard permission="employees.view"><MasterDataPage config={employeesConfig} /></Guard>} />
       <Route path="counters" element={<Guard permission="counters.view"><MasterDataPage config={countersConfig} /></Guard>} />

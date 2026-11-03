@@ -43,6 +43,7 @@ export function DisplayDevicesPage() {
   const units = useQuery({ queryKey: ['units-lookup', user?.id, branchId], enabled: Boolean(branchId) && can(user, 'units.view'), staleTime: 60_000, queryFn: async () => (await api.get<{ data: Unit[]; meta?: { branch_serves_directly: boolean } }>('/units/dropdown', { params: { branch_id: branchId || undefined } })).data })
   const unitList = units.data?.data ?? []
   const servesDirectly = units.data?.meta?.branch_serves_directly ?? true
+  const branchName = (isGlobal ? (branches.data ?? []).find((branch) => branch.id === branchId)?.branch_name : user?.branch?.branch_name) ?? 'Cabang'
   useEffect(() => { setUnitId(''); setFilterUnit('') }, [branchId])
 
   const devices = useQuery({ queryKey: ['display-devices', branchId, filterUnit], enabled: Boolean(branchId), refetchInterval: 15000, queryFn: async () => (await api.get<{ data: Device[] }>('/display-devices', { params: { branch_id: branchId || undefined, unit_id: filterUnit || undefined } })).data.data })
@@ -124,8 +125,8 @@ export function DisplayDevicesPage() {
             <tbody className="divide-y divide-slate-100">{(devices.data ?? []).map((device) => <tr key={device.id}>
               <td className="px-3 py-4"><p className="font-bold">{device.device_name}</p><p className="text-xs text-slate-500">{device.device_code} · {device.device_type === 'KIOSK' ? 'Kiosk antrian' : 'Central Display'}</p></td>
               <td className="px-3 py-4 text-slate-600">{device.unit_name ?? (!hasOwnUnit && unitList.length > 0
-                ? <Select className="w-44 py-1.5 text-xs" value="" aria-label={`Tentukan unit ${device.device_name}`} onChange={(event) => { assignUnit.reset(); setAssign({ device, unitId: event.target.value }) }}><option value="" disabled>{servesDirectly ? 'Cabang · pindah ke unit…' : 'Tentukan unit…'}</option>{unitList.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name}</option>)}</Select>
-                : <span className="text-slate-400">—</span>)}</td>
+                ? <Select className="w-44 py-1.5 text-xs" value="" aria-label={`Tentukan unit ${device.device_name}`} onChange={(event) => { assignUnit.reset(); setAssign({ device, unitId: event.target.value }) }}><option value="" disabled>{servesDirectly ? `${branchName} · pindah ke unit…` : 'Tentukan unit…'}</option>{unitList.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name}</option>)}</Select>
+                : <span className="text-slate-600">{branchName}</span>)}</td>
               <td className="px-3 py-4">{device.revoked_at ? <Badge tone="red">Dinonaktifkan</Badge> : device.is_online ? <Badge tone="green">Online</Badge> : <Badge>Offline</Badge>}</td>
               <td className="whitespace-nowrap px-3 py-4 text-slate-500">{formatDate(device.last_seen_at)}</td>
               <td className="px-3 py-4"><div className="flex justify-end gap-2">
@@ -141,7 +142,7 @@ export function DisplayDevicesPage() {
           <div className="space-y-4">
             {hasOwnUnit
               ? <Field label="Unit" hint="Perangkat otomatis tertaut ke unit Anda."><Input readOnly value={unitList[0]?.unit_name ?? '…'} aria-label="Unit" /></Field>
-              : <Field label="Unit"><Select value={unitId} onChange={(event) => setUnitId(event.target.value)} aria-label="Unit perangkat">{servesDirectly ? <option value="">Cabang (tanpa unit)</option> : <option value="" disabled>Pilih unit…</option>}{unitList.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name}</option>)}</Select>{fieldError(create.error, 'unit_id') && <p role="alert" className="mt-1 text-xs text-red-600">{fieldError(create.error, 'unit_id')}</p>}</Field>}
+              : <Field label="Unit"><Select value={unitId} onChange={(event) => setUnitId(event.target.value)} aria-label="Unit perangkat">{servesDirectly ? <option value="">{branchName}</option> : <option value="" disabled>Pilih unit…</option>}{unitList.map((unit) => <option key={unit.id} value={unit.id}>{unit.unit_name}</option>)}</Select>{fieldError(create.error, 'unit_id') && <p role="alert" className="mt-1 text-xs text-red-600">{fieldError(create.error, 'unit_id')}</p>}</Field>}
             <Field label="Tipe perangkat"><Select value={form.device_type} onChange={(event) => setForm({ ...form, device_type: event.target.value as 'DISPLAY' | 'KIOSK' })}><option value="DISPLAY">Central Display (TV)</option><option value="KIOSK">Kiosk antrian (tablet)</option></Select></Field>
             <Field label="Nama perangkat"><Input value={form.device_name} onChange={(event) => setForm({ ...form, device_name: event.target.value })} placeholder="TV Lobby / Kiosk Lobby" /></Field>
             <Field label="Kode perangkat"><Input value={form.device_code} onChange={(event) => setForm({ ...form, device_code: event.target.value })} placeholder="TV-LOBBY-01" /></Field>

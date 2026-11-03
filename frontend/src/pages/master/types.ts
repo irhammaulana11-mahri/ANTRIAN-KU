@@ -23,6 +23,10 @@ export interface FieldDef {
   hiddenWhenSelf?: boolean
   /** Untuk type combobox: tampilkan opsi "tidak terikat" (nilai kosong). Default true. */
   allowEmpty?: boolean
+  /** Untuk type combobox: teks pilihan kosong (mis. nama cabang). */
+  emptyOptionLabel?: string
+  /** Hanya tampil untuk yang berwenang penuh; disembunyikan saat pengguna hanya mengubah profil datanya sendiri. */
+  manageOnly?: boolean
 }
 
 export interface FilterDef { name: string; label: string; options: Option[] }
@@ -35,6 +39,10 @@ export interface MasterConfig<T extends MasterRow> {
   path: string
   singular: string
   managePermission: string
+  /** Izin untuk mengubah profil (bukan kode/status) data milik sendiri tanpa izin kelola penuh. */
+  ownEditPermission?: string
+  /** Apakah baris ini data milik pengguna (cabang/unitnya sendiri). */
+  isOwnRow?: (row: T, user: User | null) => boolean
   searchPlaceholder: string
   sortable: string[]
   defaultSort: string
