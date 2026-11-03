@@ -30,7 +30,7 @@ use Illuminate\Validation\ValidationException;
 
 class QueueManagementService
 {
-    public function __construct(private readonly BranchAuthorizationService $branches, private readonly QueueNumberFormatter $formatter, private readonly AuditLogService $audit, private readonly BranchAvailabilityService $availability, private readonly WaitEstimator $estimator) {}
+    public function __construct(private readonly BranchAuthorizationService $branches, private readonly QueueNumberFormatter $formatter, private readonly AuditLogService $audit, private readonly BranchAvailabilityService $availability, private readonly WaitEstimator $estimator, private readonly BranchServiceMode $mode) {}
 
     public function register(array $data, string $channel, ?User $actor = null): array
     {
@@ -41,14 +41,22 @@ class QueueManagementService
                 throw ValidationException::withMessages(['service_type_id' => 'Cabang atau jenis layanan tidak valid.']);
             }
 
+            // Layanan milik satu unit: antrian ikut unit itu; layanan umum (unit_id null) bebas unit.
+            $unitId = $data['unit_id'] ?? $actor?->unit_id;
+            if ($service->unit_id !== null) {
+                if ($unitId !== null && $unitId !== $service->unit_id) {
+                    throw ValidationException::withMessages(['service_type_id' => 'Layanan tidak tersedia di unit ini.']);
+                }
+                $unitId = $service->unit_id;
+            }
+
             $priority = $this->resolvePriority($data['priority_type_id'] ?? null, $data['branch_id'], $actor);
             $queueDate = now()->toDateString();
-            if ($channel === 'ONLINE') {
-                $this->availability->lockBranch($data['branch_id']);
-                $this->availability->assertOnlineAllowed($data['branch_id']);
-            }
             $data['customer_phone'] = $this->normalizePhone($data['customer_phone'] ?? null);
-            $sequence = $this->lockSequence($data['branch_id'], $service->id, $queueDate);
+            if ($unitId === null && ! $this->mode->servesDirectly($data['branch_id'])) {
+                throw ValidationException::withMessages(['unit_id' => 'Cabang tidak membuka layanan langsung. Pilih unit.']);
+            }
+            $sequence = $this->lockSequence($data['branch_id'], $service->id, $queueDate, $unitId);
             // Cek duplikat WAJIB setelah baris sequence terkunci: kunci itu menyerialisasi semua pendaftaran
             // untuk cabang+layanan+hari yang sama, sehingga dua permintaan serentak tidak lolos bersamaan.
             $this->assertNoActiveDuplicate($data['branch_id'], $service->id, $queueDate, $data['customer_phone']);
@@ -59,7 +67,7 @@ class QueueManagementService
             $queue = Queue::create([
                 'id' => (string) Str::uuid(),
                 'branch_id' => $data['branch_id'],
-                'unit_id' => $data['unit_id'] ?? $actor?->unit_id,
+                'unit_id' => $unitId,
                 'service_type_id' => $service->id,
                 'priority_type_id' => $priority?->id,
                 'queue_date' => $queueDate,
@@ -144,11 +152,14 @@ class QueueManagementService
             if (in_array($locked->status, [Queue::COMPLETED, Queue::CANCELLED, Queue::SKIPPED, Queue::NO_SHOW], true)) {
                 abort(409, 'Queue terminal tidak dapat ditransfer.');
             }
+            if ($target->unit_id !== null && $locked->unit_id !== null && $target->unit_id !== $locked->unit_id) {
+                abort(422, 'Layanan tujuan bukan milik unit antrian ini.');
+            }
             $from = $locked->status;
             // Antrian yang sedang dilayani ditransfer: sesi layanan harus ditutup, jika tidak petugas tertahan "melayani".
             $this->completeServiceSession($locked, 'TRANSFERRED');
             $this->releaseAssignments($locked->id);
-            $sequence = $this->lockSequence($locked->branch_id, $target->id, $locked->queue_date->toDateString());
+            $sequence = $this->lockSequence($locked->branch_id, $target->id, $locked->queue_date->toDateString(), $locked->unit_id);
             $nextNumber = $sequence->last_number + 1;
             $sequence->update(['last_number' => $nextNumber, 'updated_at' => now()]);
             $locked->update(['service_type_id' => $target->id, 'sequence_no' => $nextNumber, 'queue_number' => $this->formatter->format($target->queue_prefix, $nextNumber), 'status' => Queue::WAITING, 'called_at' => null]);
@@ -267,11 +278,13 @@ class QueueManagementService
         }
     }
 
-    private function lockSequence(string $branchId, string $serviceTypeId, string $queueDate): QueueSequence
+    /** Nomor urut per titik layanan: tiap unit (atau cabang bila unit kosong) punya urutan sendiri per layanan per hari. */
+    private function lockSequence(string $branchId, string $serviceTypeId, string $queueDate, ?string $unitId): QueueSequence
     {
-        DB::table('queue_sequences')->insertOrIgnore(['id' => (string) Str::uuid(), 'branch_id' => $branchId, 'service_type_id' => $serviceTypeId, 'queue_date' => $queueDate, 'last_number' => 0, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('queue_sequences')->insertOrIgnore(['id' => (string) Str::uuid(), 'branch_id' => $branchId, 'unit_id' => $unitId, 'service_type_id' => $serviceTypeId, 'queue_date' => $queueDate, 'last_number' => 0, 'created_at' => now(), 'updated_at' => now()]);
 
-        return QueueSequence::query()->where('branch_id', $branchId)->where('service_type_id', $serviceTypeId)->whereDate('queue_date', $queueDate)->lockForUpdate()->firstOrFail();
+        return QueueSequence::query()->where('branch_id', $branchId)->where('service_type_id', $serviceTypeId)->whereDate('queue_date', $queueDate)
+            ->when($unitId, fn ($q) => $q->where('unit_id', $unitId), fn ($q) => $q->whereNull('unit_id'))->lockForUpdate()->firstOrFail();
     }
 
     private function resolvePriority(?string $priorityTypeId, string $branchId, ?User $actor): ?PriorityType
@@ -308,7 +321,7 @@ class QueueManagementService
 
     private function eventPayload(Queue $queue): array
     {
-        return ['queue_id' => $queue->id, 'queue_number' => $queue->queue_number, 'customer_name' => $queue->customer_name, 'service_type_id' => $queue->service_type_id, 'status' => $queue->status, 'called_at' => $queue->called_at?->toIso8601String(), 'completed_at' => $queue->completed_at?->toIso8601String()];
+        return ['queue_id' => $queue->id, 'unit_id' => $queue->unit_id, 'queue_number' => $queue->queue_number, 'customer_name' => $queue->customer_name, 'service_type_id' => $queue->service_type_id, 'status' => $queue->status, 'called_at' => $queue->called_at?->toIso8601String(), 'completed_at' => $queue->completed_at?->toIso8601String()];
     }
 
     /** Petugas non-supervisor hanya boleh memproses antrian yang di-assign kepadanya. */

@@ -28,18 +28,18 @@ class QueueDistributionEngine
             if ($queues->isEmpty()) {
                 return null;
             }
-            $queue = (new PriorityQueueStrategy)->chooseQueue($queues);
-            $candidateEmployees = $this->eligibleEmployees($branchId, $service->id);
-            $employee = $this->chooseRoundRobinEmployee($branchId, $service->id, $candidateEmployees);
-            if (! $employee) {
-                return null;
-            }
-            $counter = $this->availableCounter($employee);
-            if (! $counter) {
-                return null;
+            // Tiap titik layanan (unit, atau cabang bila unit kosong) dilayani petugas titik yang sama.
+            foreach ($queues->groupBy(fn (Queue $queue): string => $queue->unit_id ?? '') as $unitKey => $group) {
+                $unitId = $unitKey === '' ? null : (string) $unitKey;
+                $queue = (new PriorityQueueStrategy)->chooseQueue($group);
+                $employee = $this->chooseRoundRobinEmployee($branchId, $service->id, $this->eligibleEmployees($branchId, $service->id, $unitId));
+                $counter = $employee ? $this->availableCounter($employee) : null;
+                if ($queue && $employee && $counter) {
+                    return $this->createAssignment($queue, $employee, $counter, 'AUTO', null, $actor);
+                }
             }
 
-            return $this->createAssignment($queue, $employee, $counter, 'AUTO', null, $actor);
+            return null;
         }, 5);
     }
 
@@ -96,9 +96,9 @@ class QueueDistributionEngine
         }, 5);
     }
 
-    private function eligibleEmployees(string $branchId, string $serviceTypeId): Collection
+    private function eligibleEmployees(string $branchId, string $serviceTypeId, ?string $unitId): Collection
     {
-        $employees = Employee::query()->where('branch_id', $branchId)->where('is_active', true)->whereHas('serviceTypes', fn ($query) => $query->whereKey($serviceTypeId))->orderBy('id')->lockForUpdate()->get();
+        $employees = Employee::query()->where('branch_id', $branchId)->where('is_active', true)->when($unitId, fn ($q) => $q->where('unit_id', $unitId), fn ($q) => $q->whereNull('unit_id'))->whereHas('serviceTypes', fn ($query) => $query->whereKey($serviceTypeId))->orderBy('id')->lockForUpdate()->get();
 
         return $employees->filter(fn (Employee $employee): bool => $this->statuses->isAvailable($employee) && ! $employee->activeAssignments()->exists() && ! $employee->activeServiceSessions()->exists())->values();
     }
@@ -130,7 +130,7 @@ class QueueDistributionEngine
         EmployeeStatusLog::create(['id' => (string) Str::orderedUuid(), 'branch_id' => $employee->branch_id, 'employee_id' => $employee->id, 'from_status' => EmployeeStatusService::AVAILABLE, 'to_status' => EmployeeStatusService::BUSY, 'reason' => 'Queue assignment', 'heartbeat_at' => null, 'recorded_at' => now()]);
         EmployeeStatusChanged::dispatch($employee->branch_id, ['employee_id' => $employee->id, 'status' => EmployeeStatusService::BUSY], $employee->id);
         QueueTransition::create(['id' => (string) Str::uuid(), 'branch_id' => $queue->branch_id, 'queue_id' => $queue->id, 'from_status' => $from, 'to_status' => Queue::ASSIGNED, 'actor_id' => $actor?->id, 'reason' => $reason ?? 'Automatic queue assignment', 'transitioned_at' => now()]);
-        QueueAssigned::dispatch($queue->branch_id, ['queue_id' => $queue->id, 'queue_number' => $queue->queue_number, 'employee_id' => $employee->id, 'counter_id' => $counter->id, 'status' => Queue::ASSIGNED], $employee->id);
+        QueueAssigned::dispatch($queue->branch_id, ['queue_id' => $queue->id, 'unit_id' => $queue->unit_id, 'queue_number' => $queue->queue_number, 'employee_id' => $employee->id, 'counter_id' => $counter->id, 'status' => Queue::ASSIGNED], $employee->id);
 
         return $assignment->load(['queue', 'employee', 'counter']);
     }

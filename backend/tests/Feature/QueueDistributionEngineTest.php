@@ -57,7 +57,7 @@ class QueueDistributionEngineTest extends TestCase
 
     private function register(Branch $branch, ServiceType $service, string $name): Queue
     {
-        $response = $this->postJson('/api/v1/queues/online', ['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => $name]);
+        $response = $this->registerQueue(['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => $name]);
         $response->assertCreated();
 
         return Queue::query()->where('customer_name', $name)->firstOrFail();

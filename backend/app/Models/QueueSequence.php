@@ -12,7 +12,7 @@ class QueueSequence extends Model
 
     public $incrementing = false;
 
-    protected $fillable = ['id', 'branch_id', 'service_type_id', 'queue_date', 'last_number'];
+    protected $fillable = ['id', 'branch_id', 'unit_id', 'service_type_id', 'queue_date', 'last_number'];
 
     protected function casts(): array
     {

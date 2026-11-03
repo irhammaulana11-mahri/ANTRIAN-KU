@@ -75,81 +75,60 @@ class RegistrationRulesTest extends TestCase
         return $user;
     }
 
-    public function test_online_is_open_when_hours_are_not_configured(): void
+    public function test_registration_works_when_hours_are_not_configured(): void
     {
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertCreated();
+        $this->walkIn($this->payload())->assertCreated();
     }
 
-    public function test_online_inside_hours_is_accepted_and_outside_hours_is_rejected_but_walk_in_is_not(): void
+    public function test_walk_in_is_not_blocked_by_operating_hours_but_availability_reports_them(): void
     {
         $this->hours('08:00', '16:00');
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertCreated();
+        $this->walkIn($this->payload())->assertCreated();
+        $this->assertTrue(app(\App\Services\BranchAvailabilityService::class)->status($this->branch->id)['is_open']);
 
         Carbon::setTestNow(Carbon::parse('2026-11-04 16:00:00', config('app.timezone')));
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertStatus(422)->assertJsonValidationErrors('branch_id');
         $this->walkIn($this->payload())->assertCreated();
-
-        Carbon::setTestNow(Carbon::parse('2026-11-04 07:59:00', config('app.timezone')));
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertStatus(422);
+        $status = app(\App\Services\BranchAvailabilityService::class)->status($this->branch->id);
+        $this->assertFalse($status['is_open']);
+        $this->assertSame('OUTSIDE_HOURS', $status['reason']);
     }
 
-    public function test_closed_weekday_and_holiday_block_online_registration(): void
+    public function test_closed_weekday_and_holiday_are_reported_by_availability(): void
     {
+        $service = app(\App\Services\BranchAvailabilityService::class);
         $this->hours(closed: true);
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertStatus(422)->assertJsonPath('errors.branch_id.0', 'Cabang tidak beroperasi hari ini.');
+        $this->assertSame('Cabang tidak beroperasi hari ini.', $service->status($this->branch->id)['message']);
 
         DB::table('operating_hours')->delete();
         DB::table('holidays')->insert(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'holiday_date' => '2026-11-04', 'holiday_name' => 'Cuti Bersama', 'created_at' => now(), 'updated_at' => now()]);
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertStatus(422)->assertJsonPath('errors.branch_id.0', 'Cabang libur: Cuti Bersama.');
-    }
-
-    public function test_online_daily_quota_is_enforced_and_cancelling_frees_a_slot(): void
-    {
-        $this->settings(['online_daily_quota' => 2]);
-        $first = $this->postJson('/api/v1/queues/online', $this->payload())->assertCreated();
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertCreated();
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertStatus(422);
-        $this->walkIn($this->payload())->assertCreated(); // walk-in tidak memakai kuota online
-
-        $this->postJson('/api/v1/queues/cancel-by-token', ['token' => $first->json('data.token')])->assertOk();
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertCreated();
-    }
-
-    public function test_waiting_threshold_blocks_online_only(): void
-    {
-        $this->settings(['max_waiting_threshold' => 2]);
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertCreated();
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertCreated();
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertStatus(422);
-        $this->walkIn($this->payload())->assertCreated();
+        $this->assertSame('Cabang libur: Cuti Bersama.', $service->status($this->branch->id)['message']);
     }
 
     public function test_same_phone_cannot_hold_two_active_queues_for_a_service(): void
     {
-        $this->postJson('/api/v1/queues/online', $this->payload(['customer_phone' => '0812-3456-7890']))->assertCreated();
-        $this->postJson('/api/v1/queues/online', $this->payload(['customer_phone' => '0812 3456 7890']))->assertStatus(422)->assertJsonValidationErrors('customer_phone');
+        $this->walkIn($this->payload(['customer_phone' => '0812-3456-7890']))->assertCreated();
+        $this->walkIn($this->payload(['customer_phone' => '0812 3456 7890']))->assertStatus(422)->assertJsonValidationErrors('customer_phone');
         $this->assertDatabaseHas('queues', ['customer_phone' => '081234567890']);
     }
 
     public function test_public_catalog_exposes_availability_without_internal_fields(): void
     {
         $this->hours('08:00', '16:00');
-        $this->settings(['online_daily_quota' => 5]);
-        $this->postJson('/api/v1/queues/online', $this->payload())->assertCreated();
+        $this->walkIn($this->payload())->assertCreated();
 
         $branch = collect($this->getJson('/api/v1/catalog/branches')->assertOk()->json('data'))->firstWhere('id', $this->branch->id);
         $this->assertTrue($branch['availability']['is_open']);
         $this->assertSame('08:00', $branch['availability']['opens_at']);
-        $this->assertSame(4, $branch['availability']['online_quota']['remaining']);
+        $this->assertSame(1, $branch['availability']['waiting_count']);
         $this->assertArrayNotHasKey('is_active', $branch);
     }
 
     public function test_tracking_shows_priority_aware_position_estimate_and_counter(): void
     {
         $priority = PriorityType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'priority_code' => 'PRIORITY', 'priority_name' => 'Prioritas', 'weight' => 100, 'aging_rate' => 1, 'aging_interval_seconds' => 300, 'verification_required' => true, 'is_active' => true]);
-        $normal = $this->postJson('/api/v1/queues/online', $this->payload())->json('data');
-        $second = $this->postJson('/api/v1/queues/online', $this->payload())->json('data');
-        $this->postJson('/api/v1/queues/online', $this->payload(['priority_type_id' => $priority->id]))->assertStatus(422); // customer online tidak boleh klaim prioritas
+        $normal = $this->walkIn($this->payload())->json('data');
+        $second = $this->walkIn($this->payload())->json('data');
+        $this->walkIn($this->payload(['priority_type_id' => $priority->id]))->assertStatus(422); // pelanggan tidak boleh klaim prioritas tanpa verifikasi petugas
         $this->postJson('/api/v1/queues/walk-in', $this->payload(['priority_type_id' => $priority->id]))->assertUnauthorized(); // walk-in tanpa login ditolak
         $urgent = $this->walkIn($this->payload(['priority_type_id' => $priority->id]), 'Admin Unit')->assertCreated()->json('data');
 
@@ -184,13 +163,12 @@ class RegistrationRulesTest extends TestCase
         Sanctum::actingAs($admin);
         $hours = collect(range(1, 7))->map(fn (int $day) => ['weekday' => $day, 'is_closed' => $day >= 6, 'opens_at' => '08:00', 'closes_at' => '15:30'])->all();
 
-        $this->putJson('/api/v1/settings/queue', ['online_daily_quota' => 50, 'max_waiting_threshold' => 30, 'operating_hours' => $hours])->assertOk()
-            ->assertJsonPath('data.online_daily_quota', 50)->assertJsonPath('data.operating_hours.2.closes_at', '15:30')->assertJsonPath('data.operating_hours.5.is_closed', true)
+        $this->putJson('/api/v1/settings/queue', ['operating_hours' => $hours])->assertOk()
+            ->assertJsonPath('data.operating_hours.2.closes_at', '15:30')->assertJsonPath('data.operating_hours.5.is_closed', true)
             ->assertJsonPath('data.availability.is_open', true);
 
         $bad = $hours; $bad[0]['closes_at'] = '07:00';
         $this->putJson('/api/v1/settings/queue', ['operating_hours' => $bad])->assertStatus(422)->assertJsonValidationErrors('operating_hours.0.closes_at');
-        $this->putJson('/api/v1/settings/queue', ['online_daily_quota' => -1])->assertStatus(422);
 
         $this->postJson('/api/v1/settings/holidays', ['holiday_date' => '2026-11-04', 'holiday_name' => 'Libur Uji'])->assertCreated();
         $holidayId = $this->getJson('/api/v1/settings/queue')->json('data.holidays.0.id');
@@ -203,7 +181,7 @@ class RegistrationRulesTest extends TestCase
         $this->getJson('/api/v1/settings/queue?branch_id='.$other->id)->assertStatus(422); // cabang lain ditolak
 
         Sanctum::actingAs($this->user('Customer Service'));
-        $this->putJson('/api/v1/settings/queue', ['online_daily_quota' => 1])->assertForbidden();
+        $this->putJson('/api/v1/settings/queue', ['branch_serves_directly' => false])->assertForbidden();
         $this->assertSame(0, Queue::count());
     }
 

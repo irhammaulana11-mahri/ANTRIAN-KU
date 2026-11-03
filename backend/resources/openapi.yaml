@@ -207,7 +207,7 @@ paths:
       - Katalog Publik
       summary: Daftar cabang aktif + status pendaftaran
       operationId: catalogBranches
-      description: 'Publik. Setiap cabang menyertakan `availability`: buka/tutup, jam operasional, sisa kuota online hari ini.'
+      description: 'Publik. Setiap cabang menyertakan `availability`: buka/tutup, jam operasional, dan jumlah antrian menunggu.'
       responses:
         '200':
           description: Daftar cabang.
@@ -236,6 +236,13 @@ paths:
         schema:
           type: string
           format: uuid
+      - name: unit_id
+        in: query
+        required: false
+        description: Bila diisi, hanya layanan umum dan layanan unit tersebut.
+        schema:
+          type: string
+          format: uuid
       responses:
         '200':
           description: Daftar layanan.
@@ -253,42 +260,6 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
       security: []
-  /queues/online:
-    post:
-      tags:
-      - Antrian Publik
-      summary: Pendaftaran online
-      operationId: registerOnline
-      description: 'Nomor urut dibuat dengan transaksi + `SELECT FOR UPDATE` pada `queue_sequences` (per cabang, layanan, tanggal operasional)
-        sehingga aman dari duplikasi walau banyak pendaftar bersamaan. Token pelacakan **hanya ditampilkan sekali**. Dibatasi 20 permintaan/menit
-        per IP.
-
-
-        Ditolak (422) bila cabang libur/tutup/di luar jam operasional, kuota online harian penuh, antrian menunggu melewati ambang, atau nomor
-        telepon yang sama sudah punya antrian aktif untuk layanan itu. Prioritas hanya boleh diklaim oleh staf berwenang (`queues.assign`).'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RegistrationInput'
-      responses:
-        '201':
-          description: Antrian dibuat.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/RegistrationResult'
-                  message:
-                    type: string
-        '422':
-          $ref: '#/components/responses/ValidationError'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-      security: []
   /queues/walk-in:
     post:
       tags:
@@ -300,9 +271,8 @@ paths:
         per IP.
 
 
-        **Wajib login.** Dahulu publik; sekarang dikunci agar jam operasional dan kuota online tidak dapat dilewati dari luar. Untuk tablet di
-        kantor gunakan `POST /kiosk/queues`. Cabang harus milik pemanggil (Super Admin bebas). Tidak dibatasi jam operasional/kuota online. Kategori
-        prioritas hanya diterima bila pemanggil punya `queues.assign`.
+        **Wajib login.** Pendaftaran hanya dilakukan di kantor/cabang. Untuk tablet di kantor gunakan `POST /kiosk/queues`. Cabang harus milik
+        pemanggil (Super Admin bebas). Tidak dibatasi jam operasional. Kategori prioritas hanya diterima bila pemanggil punya `queues.assign`.
 
 
         **Izin:** ``queues.register` atau `queues.assign``.'
@@ -427,7 +397,7 @@ paths:
       - Antrian Publik
       summary: Batalkan antrian dengan token
       operationId: cancelByToken
-      description: Hanya untuk status WAITING/ASSIGNED/CALLED. Membebaskan petugas dan kuota online.
+      description: Hanya untuk status WAITING/ASSIGNED/CALLED. Membebaskan petugas.
       requestBody:
         required: true
         content:
@@ -1610,7 +1580,7 @@ paths:
       - $ref: '#/components/parameters/BranchIdQuery'
       responses:
         '200':
-          description: Daftar ringkas unit aktif.
+          description: Daftar ringkas unit aktif; `meta.branch_serves_directly` menunjukkan apakah unit boleh dikosongkan (layanan cabang).
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
@@ -2549,10 +2519,16 @@ paths:
       - Central Display
       summary: Daftar perangkat display & kiosk
       operationId: listDisplayDevices
-      description: '**Izin:** `displays.manage`.'
+      description: '**Izin:** `displays.manage`. Admin Unit hanya melihat perangkat unitnya.'
       parameters:
       - $ref: '#/components/parameters/PerPage'
       - $ref: '#/components/parameters/BranchIdQuery'
+      - name: unit_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
       responses:
         '200':
           description: Daftar berhalaman.
@@ -2596,6 +2572,10 @@ paths:
                 branch_id:
                   type: string
                   format: uuid
+                unit_id:
+                  type: string
+                  format: uuid
+                  description: Wajib untuk Super Admin/Admin Cabang; diabaikan untuk Admin Unit (otomatis unitnya).
                 device_code:
                   type: string
                   maxLength: 80
@@ -2628,6 +2608,86 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationError'
+  /display-devices/{device}/unit:
+    put:
+      tags:
+      - Central Display
+      summary: Tentukan unit perangkat
+      operationId: assignDisplayDeviceUnit
+      description: 'Hanya untuk perangkat yang belum berunit; unit yang sudah ditetapkan tidak dapat diubah.
+
+
+        **Izin:** `displays.manage`.'
+      parameters:
+      - name: device
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - unit_id
+              properties:
+                unit_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Unit ditentukan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DisplayDevice'
+                  message:
+                    type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /display-devices/{device}:
+    delete:
+      tags:
+      - Central Display
+      summary: Hapus perangkat
+      operationId: deleteDisplayDevice
+      description: 'Soft delete: token perangkat dicabut dan kode perangkat dapat dipakai lagi.
+
+
+        **Izin:** `displays.manage`.'
+      parameters:
+      - name: device
+        in: path
+        required: true
+        description: ID (UUID).
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Dihapus.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /display-devices/{device}/rotate:
     post:
       tags:
@@ -2706,7 +2766,7 @@ paths:
       - Pengaturan
       summary: Pengaturan antrian cabang
       operationId: getQueueSettings
-      description: 'Jam operasional (Senin=1…Minggu=7), kuota online, ambang antrian menunggu, hari libur, dan status ketersediaan saat ini.
+      description: 'Jam operasional (Senin=1…Minggu=7), hari libur, dan status ketersediaan saat ini.
 
 
         **Izin:** `settings.manage`.'
@@ -2735,8 +2795,7 @@ paths:
       - Pengaturan
       summary: Simpan pengaturan antrian
       operationId: updateQueueSettings
-      description: 'Cabang yang belum mengatur jam operasional dianggap buka. `online_daily_quota`/`max_waiting_threshold` kosong (`null`) = tanpa
-        batas.
+      description: 'Cabang yang belum mengatur jam operasional dianggap buka. 
 
 
         **Izin:** `settings.manage`.'
@@ -2770,7 +2829,7 @@ paths:
       - Pengaturan
       summary: Tambah hari libur
       operationId: addHoliday
-      description: 'Pendaftaran online ditutup pada tanggal ini.
+      description: 'Cabang ditandai libur pada tanggal ini.
 
 
         **Izin:** `settings.manage`.'
@@ -3575,26 +3634,6 @@ components:
         holiday_name:
           type: string
           nullable: true
-        online_available:
-          type: boolean
-        online_reason:
-          type: string
-          nullable: true
-          description: HOLIDAY, CLOSED_DAY, OUTSIDE_HOURS, QUOTA_FULL, atau WAITING_FULL.
-        online_message:
-          type: string
-          nullable: true
-        online_quota:
-          type: object
-          properties:
-            limit:
-              type: integer
-              nullable: true
-            used:
-              type: integer
-            remaining:
-              type: integer
-              nullable: true
         waiting_count:
           type: integer
     Employee:
@@ -3776,6 +3815,11 @@ components:
         branch_id:
           type: string
           format: uuid
+        unit_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Kosong = layanan berlaku untuk semua unit di cabang.
         service_code:
           type: string
         service_name:
@@ -3804,6 +3848,11 @@ components:
         branch_id:
           type: string
           format: uuid
+        unit_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Kosong = layanan berlaku untuk semua unit di cabang.
         service_code:
           type: string
           maxLength: 40
@@ -4319,6 +4368,13 @@ components:
         branch_id:
           type: string
           format: uuid
+        unit_id:
+          type: string
+          format: uuid
+          nullable: true
+        unit_name:
+          type: string
+          nullable: true
         device_code:
           type: string
         device_name:
@@ -4512,14 +4568,9 @@ components:
         branch_id:
           type: string
           format: uuid
-        online_daily_quota:
-          type: integer
-          nullable: true
-          minimum: 0
-        max_waiting_threshold:
-          type: integer
-          nullable: true
-          minimum: 0
+        branch_serves_directly:
+          type: boolean
+          description: Cabang membuka layanan sendiri (antrian tanpa unit). Bila false, seluruh pelayanan ada di unit dan unit wajib diisi.
         operating_hours:
           type: array
           items:
@@ -4560,14 +4611,9 @@ components:
         branch_id:
           type: string
           format: uuid
-        online_daily_quota:
-          type: integer
-          nullable: true
-          minimum: 0
-        max_waiting_threshold:
-          type: integer
-          nullable: true
-          minimum: 0
+        branch_serves_directly:
+          type: boolean
+          description: Cabang membuka layanan sendiri (antrian tanpa unit). Bila false, seluruh pelayanan ada di unit dan unit wajib diisi.
         operating_hours:
           type: array
           minItems: 7

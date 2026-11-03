@@ -45,7 +45,7 @@ class EmployeeWorkspaceTest extends TestCase
 
     private function register(string $name): string
     {
-        return $this->postJson('/api/v1/queues/online', ['branch_id' => $this->branch->id, 'service_type_id' => $this->service->id, 'customer_name' => $name])->assertCreated()->json('data.queue.id');
+        return $this->registerQueue(['branch_id' => $this->branch->id, 'service_type_id' => $this->service->id, 'customer_name' => $name])->assertCreated()->json('data.queue.id');
     }
 
     public function test_operator_goes_online_gets_waiting_queue_and_completes_full_cycle(): void
@@ -122,7 +122,7 @@ class EmployeeWorkspaceTest extends TestCase
         [$user] = $this->operator('Citra', 'CS-01');
         $tellerService = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'service_name' => 'Teller', 'queue_prefix' => 'TL', 'priority_enabled' => true, 'is_active' => true]);
         $this->register('CS Customer');
-        $this->postJson('/api/v1/queues/online', ['branch_id' => $this->branch->id, 'service_type_id' => $tellerService->id, 'customer_name' => 'Teller Customer'])->assertCreated();
+        $this->registerQueue(['branch_id' => $this->branch->id, 'service_type_id' => $tellerService->id, 'customer_name' => 'Teller Customer'])->assertCreated();
         Sanctum::actingAs($user);
 
         $numbers = collect($this->getJson('/api/v1/queues/history')->assertOk()->json('data'))->pluck('queue_number');

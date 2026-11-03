@@ -16,9 +16,7 @@ class QueueSettingsService
 
         return [
             'branch_id' => $branchId,
-            'online_daily_quota' => $settings?->online_daily_quota,
-            'max_waiting_threshold' => $settings?->max_waiting_threshold,
-            'offline_only' => (bool) ($settings?->offline_only ?? false),
+            'branch_serves_directly' => (bool) ($settings?->branch_serves_directly ?? true),
             // Senin(1)–Minggu(7). Hari tanpa baris dianggap belum diatur (cabang dianggap buka).
             'operating_hours' => collect(range(1, 7))->map(fn (int $day): array => [
                 'weekday' => $day,
@@ -36,7 +34,7 @@ class QueueSettingsService
         $before = $this->get($branchId);
         DB::transaction(function () use ($branchId, $data): void {
             $now = now();
-            $values = array_intersect_key($data, array_flip(['online_daily_quota', 'max_waiting_threshold', 'offline_only']));
+            $values = array_intersect_key($data, array_flip(['branch_serves_directly']));
             if ($values !== []) {
                 DB::table('queue_settings')->updateOrInsert(['branch_id' => $branchId], $values + ['id' => (string) (DB::table('queue_settings')->where('branch_id', $branchId)->value('id') ?? Str::uuid()), 'updated_at' => $now, 'created_at' => $now]);
             }

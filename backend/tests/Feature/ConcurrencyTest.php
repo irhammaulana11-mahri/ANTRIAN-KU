@@ -172,19 +172,6 @@ class ConcurrencyTest extends TestCase
         $this->assertSame(6, (int) DB::table('queue_sequences')->where('service_type_id', $cs)->value('last_number'));
     }
 
-    public function test_online_quota_is_never_exceeded_under_concurrency(): void
-    {
-        $serviceId = $this->service()->id;
-        DB::table('queue_settings')->insert(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'online_daily_quota' => 3, 'created_at' => now(), 'updated_at' => now()]);
-        $tasks = array_map(fn (int $i) => self::register($this->branch->id, $serviceId, 'ONLINE', $i), range(1, 10));
-
-        $results = Parallel::run($tasks);
-
-        $this->assertSame(3, collect($results)->where('ok', true)->count(), 'tepat sesuai kuota yang boleh berhasil: '.json_encode($results));
-        $this->assertSame(7, collect($results)->where('ok', false)->filter(fn ($r) => str_contains($r['error'], 'ValidationException'))->count(), 'sisanya ditolak oleh validasi kuota, bukan error lain');
-        $this->assertSame(3, Queue::where('registration_channel', 'ONLINE')->count());
-    }
-
     public function test_same_phone_cannot_register_twice_even_simultaneously(): void
     {
         $serviceId = $this->service()->id;

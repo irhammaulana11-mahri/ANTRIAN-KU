@@ -26,6 +26,10 @@ abstract class BranchEvent implements ShouldBroadcast, ShouldDispatchAfterCommit
     public function broadcastOn(): array
     {
         $channels = [new PrivateChannel('branch.'.$this->branchId)];
+        // Event milik unit juga dikirim ke channel unit, dipakai perangkat display/kiosk yang terkunci ke unit.
+        if (! empty($this->payload['unit_id'])) {
+            $channels[] = new PrivateChannel('branch.'.$this->branchId.'.unit.'.$this->payload['unit_id']);
+        }
         if ($this->employeeId) {
             $channels[] = new PrivateChannel('employee.'.$this->employeeId);
         }

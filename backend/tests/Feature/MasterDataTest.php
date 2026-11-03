@@ -62,7 +62,7 @@ class MasterDataTest extends TestCase
 
     private function register(ServiceType $service, string $name = 'Pelanggan'): string
     {
-        return $this->postJson('/api/v1/queues/online', ['branch_id' => $service->branch_id, 'service_type_id' => $service->id, 'customer_name' => $name])->assertCreated()->json('data.queue.id');
+        return $this->registerQueue(['branch_id' => $service->branch_id, 'service_type_id' => $service->id, 'customer_name' => $name])->assertCreated()->json('data.queue.id');
     }
 
     public function test_duplicate_codes_are_validation_errors_not_server_errors(): void
@@ -236,7 +236,7 @@ class MasterDataTest extends TestCase
         $this->assertDatabaseCount('employee_services', 0);
         $this->app['auth']->forgetGuards();
         $this->assertSame([], $this->getJson('/api/v1/catalog/service-types?branch_id='.$this->branch->id)->json('data'));
-        $this->postJson('/api/v1/queues/online', ['branch_id' => $this->branch->id, 'service_type_id' => $service->id, 'customer_name' => 'X'])->assertStatus(422);
+        $this->registerQueue(['branch_id' => $this->branch->id, 'service_type_id' => $service->id, 'customer_name' => 'X'])->assertStatus(422);
         $this->assertNotNull($employee->refresh());
     }
 
@@ -266,7 +266,7 @@ class MasterDataTest extends TestCase
         $this->putJson("/api/v1/branches/{$this->branch->id}", ['is_active' => false])->assertOk();
 
         $this->app['auth']->forgetGuards();
-        $this->postJson('/api/v1/queues/online', ['branch_id' => $this->branch->id, 'service_type_id' => $service->id, 'customer_name' => 'X'])->assertStatus(422);
+        $this->registerQueue(['branch_id' => $this->branch->id, 'service_type_id' => $service->id, 'customer_name' => 'X'])->assertStatus(422);
 
         Sanctum::actingAs($this->user('Super Admin', global: true));
         $this->deleteJson("/api/v1/branches/{$this->other->id}")->assertNoContent(); // kosong → boleh

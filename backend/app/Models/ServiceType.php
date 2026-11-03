@@ -13,7 +13,7 @@ class ServiceType extends Model
 
     public $incrementing = false;
 
-    protected $fillable = ['id', 'branch_id', 'service_name', 'queue_prefix', 'priority_enabled', 'is_active'];
+    protected $fillable = ['id', 'branch_id', 'unit_id', 'service_name', 'queue_prefix', 'priority_enabled', 'is_active'];
 
     protected function casts(): array
     {
@@ -23,6 +23,11 @@ class ServiceType extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function unit()
+    {
+        return $this->belongsTo(Unit::class);
     }
 
     public function employees()

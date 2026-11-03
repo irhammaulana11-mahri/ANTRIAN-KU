@@ -28,7 +28,6 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     Route::post('auth/login', [AuthController::class, 'login'])->middleware(['guest', 'throttle:auth.login']);
     Route::get('catalog/branches', [BranchController::class, 'publicIndex']);
     Route::get('catalog/service-types', [ServiceTypeController::class, 'publicIndex']);
-    Route::post('queues/online', [QueueController::class, 'online'])->middleware('throttle:queue.register');
     Route::get('queues/track/{token}', [QueueController::class, 'track']);
     Route::post('queues/cancel-by-token', [QueueController::class, 'cancelByToken']);
 
@@ -43,8 +42,10 @@ Route::prefix('v1')->middleware('throttle:api')->group(function (): void {
     Route::middleware(['auth:sanctum', 'branch.context'])->group(function (): void {
         Route::get('display-devices', [DisplayDeviceController::class, 'index']);
         Route::post('display-devices', [DisplayDeviceController::class, 'store']);
+        Route::put('display-devices/{device}/unit', [DisplayDeviceController::class, 'assignUnit']);
         Route::post('display-devices/{device}/rotate', [DisplayDeviceController::class, 'rotate']);
         Route::post('display-devices/{device}/revoke', [DisplayDeviceController::class, 'revoke']);
+        Route::delete('display-devices/{device}', [DisplayDeviceController::class, 'destroy']);
         Route::get('priority-types', [PriorityTypeController::class, 'index']);
         Route::get('settings/queue', [QueueSettingsController::class, 'show']);
         Route::put('settings/queue', [QueueSettingsController::class, 'update']);

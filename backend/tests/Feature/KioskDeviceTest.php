@@ -42,12 +42,18 @@ class KioskDeviceTest extends TestCase
         return $user;
     }
 
+    private function unitOf(Branch $branch): string
+    {
+        return \App\Models\Unit::query()->where('branch_id', $branch->id)->value('id')
+            ?? \App\Models\Unit::create(['id' => (string) Str::uuid(), 'branch_id' => $branch->id, 'unit_code' => 'U'.Str::random(4), 'unit_name' => 'Unit Uji', 'is_active' => true])->id;
+    }
+
     /** Membuat perangkat lewat API admin lalu mengaktifkannya; mengembalikan [token, id]. */
     private function pair(string $type, ?Branch $branch = null): array
     {
         $branch ??= $this->branch;
         Sanctum::actingAs($this->user('Admin Cabang', $branch));
-        $created = $this->postJson('/api/v1/display-devices', ['device_code' => strtoupper($type).'-'.Str::random(4), 'device_name' => ucfirst(strtolower($type)), 'device_type' => $type])->assertCreated();
+        $created = $this->postJson('/api/v1/display-devices', ['device_code' => strtoupper($type).'-'.Str::random(4), 'device_name' => ucfirst(strtolower($type)), 'device_type' => $type, 'unit_id' => $this->unitOf($branch)])->assertCreated();
         $this->app['auth']->forgetGuards();
         $session = $this->postJson('/api/v1/display/activate', ['credential' => $created->json('credential')])->assertOk()->assertJsonPath('data.device.device_type', $type);
         $this->app['auth']->forgetGuards();
@@ -70,8 +76,8 @@ class KioskDeviceTest extends TestCase
         $this->assertSame('["kiosk"]', \DB::table('personal_access_tokens')->where('name', 'kiosk')->value('abilities'));
 
         Sanctum::actingAs($this->user('Admin Cabang'));
-        $this->postJson('/api/v1/display-devices', ['device_code' => 'TV-X', 'device_name' => 'TV'])->assertCreated()->assertJsonPath('data.device_type', 'DISPLAY');
-        $this->postJson('/api/v1/display-devices', ['device_code' => 'BAD', 'device_name' => 'Salah', 'device_type' => 'ROBOT'])->assertStatus(422)->assertJsonValidationErrors('device_type');
+        $this->postJson('/api/v1/display-devices', ['device_code' => 'TV-X', 'device_name' => 'TV', 'unit_id' => $this->unitOf($this->branch)])->assertCreated()->assertJsonPath('data.device_type', 'DISPLAY');
+        $this->postJson('/api/v1/display-devices', ['device_code' => 'BAD', 'device_name' => 'Salah', 'device_type' => 'ROBOT', 'unit_id' => $this->unitOf($this->branch)])->assertStatus(422)->assertJsonValidationErrors('device_type');
         $this->assertNotEmpty($token);
     }
 
@@ -108,9 +114,9 @@ class KioskDeviceTest extends TestCase
     public function test_kiosk_ticket_is_auto_assigned_when_an_operator_is_available(): void
     {
         $staff = $this->user('Customer Service');
-        $employee = Employee::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'user_id' => $staff->id, 'employee_code' => 'E1', 'employee_name' => 'Budi', 'is_active' => true]);
+        $employee = Employee::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_id' => $this->unitOf($this->branch), 'user_id' => $staff->id, 'employee_code' => 'E1', 'employee_name' => 'Budi', 'is_active' => true]);
         $employee->serviceTypes()->attach($this->service->id);
-        $employee->counters()->attach(Counter::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'counter_code' => 'CS-01', 'counter_name' => 'Loket 1', 'counter_type' => 'CS', 'is_active' => true])->id);
+        $employee->counters()->attach(Counter::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_id' => $this->unitOf($this->branch), 'counter_code' => 'CS-01', 'counter_name' => 'Loket 1', 'counter_type' => 'CS', 'is_active' => true])->id);
         Sanctum::actingAs($staff);
         $this->postJson('/api/v1/employee/status', ['status' => 'AVAILABLE'])->assertOk();
         $this->app['auth']->forgetGuards();
@@ -142,7 +148,9 @@ class KioskDeviceTest extends TestCase
         $channel = 'private-branch.'.$this->branch->id;
 
         $this->as($kiosk, 'POST', '/broadcasting/auth', ['socket_id' => '1.2', 'channel_name' => $channel])->assertForbidden();
-        $this->as($display, 'POST', '/broadcasting/auth', ['socket_id' => '1.2', 'channel_name' => $channel])->assertOk();
+        // Display berunit memakai channel unitnya; channel cabang ditolak.
+        $this->as($display, 'POST', '/broadcasting/auth', ['socket_id' => '1.2', 'channel_name' => $channel])->assertForbidden();
+        $this->as($display, 'POST', '/broadcasting/auth', ['socket_id' => '1.2', 'channel_name' => $channel.'.unit.'.$this->unitOf($this->branch)])->assertOk();
     }
 
     public function test_refresh_keeps_the_device_type_and_revoked_kiosk_loses_access(): void
@@ -182,5 +190,23 @@ class KioskDeviceTest extends TestCase
         Sanctum::actingAs($this->user('Admin Cabang'));
         $this->postJson('/api/v1/queues/walk-in', $payload)->assertCreated()->assertJsonPath('data.queue.queue_number', 'CS-001');
         $this->assertSame(1, Queue::count());
+    }
+
+    public function test_kiosk_only_offers_and_accepts_general_services_and_services_of_its_unit(): void
+    {
+        $unitA = $this->unitOf($this->branch);
+        $unitB = \App\Models\Unit::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_code' => 'UB', 'unit_name' => 'Unit B', 'is_active' => true])->id;
+        $svcA = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_id' => $unitA, 'service_name' => 'Khusus A', 'queue_prefix' => 'KA', 'priority_enabled' => false, 'is_active' => true]);
+        $svcB = ServiceType::create(['id' => (string) Str::uuid(), 'branch_id' => $this->branch->id, 'unit_id' => $unitB, 'service_name' => 'Khusus B', 'queue_prefix' => 'KB', 'priority_enabled' => false, 'is_active' => true]);
+
+        [$token] = $this->pair('KIOSK'); // perangkat di unit A (unit pertama cabang)
+        $names = array_column($this->as($token, 'GET', '/api/v1/kiosk/config')->assertOk()->json('data.services'), 'service_name');
+        $this->assertContains('Customer Service', $names); // layanan umum
+        $this->assertContains('Khusus A', $names);
+        $this->assertNotContains('Khusus B', $names);
+
+        $this->as($token, 'POST', '/api/v1/kiosk/queues', ['service_type_id' => $svcB->id, 'customer_name' => 'Tamu'])->assertStatus(422);
+        $this->as($token, 'POST', '/api/v1/kiosk/queues', ['service_type_id' => $svcA->id, 'customer_name' => 'Tamu'])->assertCreated();
+        $this->assertDatabaseHas('queues', ['service_type_id' => $svcA->id, 'unit_id' => $unitA]);
     }
 }

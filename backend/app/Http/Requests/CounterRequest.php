@@ -28,9 +28,9 @@ class CounterRequest extends FormRequest
 
         return [
             'branch_id' => ['nullable', 'uuid'],
-            // Admin Cabang wajib memilih unit; Admin Unit otomatis memakai unitnya (diabaikan di service).
+            // Wajib memilih unit bila cabang tidak membuka layanan langsung; kosong = loket cabang. Admin Unit otomatis memakai unitnya.
             'unit_id'   => [
-                Rule::requiredIf(fn () => $user?->unit_id === null && $user?->branch_id !== null && $this->isMethod('POST')),
+                Rule::requiredIf(fn () => $user?->unit_id === null && $this->isMethod('POST') && ! app(\App\Services\BranchServiceMode::class)->servesDirectly($branchId)),
                 'nullable', 'uuid',
                 Rule::exists('units', 'id')->where('branch_id', $branchId)->whereNull('deleted_at'),
             ],

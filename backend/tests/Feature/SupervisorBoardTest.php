@@ -70,7 +70,7 @@ class SupervisorBoardTest extends TestCase
 
     private function register(ServiceType $service, string $name = 'Pelanggan'): string
     {
-        return $this->postJson('/api/v1/queues/online', ['branch_id' => $service->branch_id, 'service_type_id' => $service->id, 'customer_name' => $name])->assertCreated()->json('data.queue.id');
+        return $this->registerQueue(['branch_id' => $service->branch_id, 'service_type_id' => $service->id, 'customer_name' => $name])->assertCreated()->json('data.queue.id');
     }
 
     public function test_board_requires_assign_permission_and_branch(): void

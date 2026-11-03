@@ -16,7 +16,13 @@ class ServiceTypeController extends Controller
     public function index(Request $request)
     {
         $this->authorize('viewAny', ServiceType::class);
-        $query = $this->service->scope(new ServiceType, $request->user(), $request->attributes->get('branch_id'));
+        $user = $request->user();
+        $branchId = $request->attributes->get('branch_id');
+        // Layanan tanpa unit berlaku untuk semua unit, jadi Admin Unit melihat layanan umum + layanan unitnya.
+        $query = ServiceType::query()->with('unit')
+            ->when($branchId, fn ($q) => $q->where('service_types.branch_id', $branchId))
+            ->when($user->unit_id, fn ($q) => $q->where(fn ($w) => $w->whereNull('service_types.unit_id')->orWhere('service_types.unit_id', $user->unit_id)))
+            ->when(! $user->unit_id && $request->filled('unit_id'), fn ($q) => $q->where('service_types.unit_id', $request->string('unit_id')->toString()));
         $this->service->listing($query, $request, ['service_types.service_name', 'service_types.queue_prefix'], ['service_name', 'queue_prefix', 'is_active', 'created_at'], 'service_name');
 
         return ServiceTypeResource::collection($query->paginate($this->service->perPage($request)));
@@ -26,7 +32,11 @@ class ServiceTypeController extends Controller
     {
         abort_unless($request->filled('branch_id'), 422, 'branch_id wajib diisi.');
 
-        return ServiceTypeResource::collection(ServiceType::query()->where('branch_id', $request->string('branch_id'))->where('is_active', true)->orderBy('service_name')->get());
+        $unitId = $request->input('unit_id');
+
+        return ServiceTypeResource::collection(ServiceType::query()->where('branch_id', $request->string('branch_id'))->where('is_active', true)
+            ->when($unitId, fn ($q) => $q->where(fn ($w) => $w->whereNull('unit_id')->orWhere('unit_id', $unitId)))
+            ->orderBy('service_name')->get());
     }
 
     public function store(ServiceTypeRequest $request)

@@ -40,11 +40,11 @@ class EmployeeRequest extends FormRequest
 
         return [
             'branch_id' => ['nullable', 'uuid'],
-            // Admin Unit wajib terikat unit; Admin Cabang wajib memilih unit untuk staf di bawahnya.
+            // Admin Unit wajib terikat unit; staf wajib berunit bila cabang tidak membuka layanan langsung (kosong = petugas cabang).
             'unit_id'   => [
                 Rule::requiredIf(fn () => $user?->unit_id === null && (
                     $this->input('role_name') === 'Admin Unit'
-                    || ($creating && $user?->branch_id !== null)
+                    || ($creating && ! app(\App\Services\BranchServiceMode::class)->servesDirectly($branchId))
                 )),
                 'nullable', 'uuid',
                 Rule::exists('units', 'id')->where('branch_id', $branchId)->whereNull('deleted_at'),

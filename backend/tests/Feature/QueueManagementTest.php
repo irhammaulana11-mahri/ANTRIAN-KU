@@ -52,7 +52,7 @@ class QueueManagementTest extends TestCase
     public function test_online_registration_and_secure_tracking_work(): void
     {
         [$branch, $service] = $this->branchWithServices();
-        $registration = $this->postJson('/api/v1/queues/online', ['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Sari']);
+        $registration = $this->registerQueue(['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Sari']);
         $registration->assertCreated();
         $token = $registration->json('data.token');
         $this->assertNotEmpty($token);
@@ -64,8 +64,8 @@ class QueueManagementTest extends TestCase
     {
         [$branch, $service] = $this->branchWithServices();
         $payload = ['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Customer'];
-        $this->postJson('/api/v1/queues/online', $payload)->assertCreated();
-        $this->postJson('/api/v1/queues/online', $payload)->assertCreated();
+        $this->registerQueue($payload)->assertCreated();
+        $this->registerQueue($payload)->assertCreated();
         $this->assertDatabaseCount('queues', 2);
         $this->assertDatabaseHas('queues', ['queue_number' => 'CS-001']);
         $this->assertDatabaseHas('queues', ['queue_number' => 'CS-002']);
@@ -74,7 +74,7 @@ class QueueManagementTest extends TestCase
     public function test_customer_can_cancel_with_secure_token(): void
     {
         [$branch, $service] = $this->branchWithServices();
-        $registration = $this->postJson('/api/v1/queues/online', ['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Rina']);
+        $registration = $this->registerQueue(['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Rina']);
         $this->postJson('/api/v1/queues/cancel-by-token', ['token' => $registration->json('data.token'), 'reason' => 'Tidak jadi'])->assertOk()->assertJsonPath('data.status', Queue::CANCELLED);
     }
 
@@ -82,13 +82,13 @@ class QueueManagementTest extends TestCase
     {
         [$branch, $service] = $this->branchWithServices();
         $priority = PriorityType::where('branch_id', $branch->id)->where('priority_code', 'PRIORITY')->firstOrFail();
-        $this->postJson('/api/v1/queues/online', ['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Claim', 'priority_type_id' => $priority->id])->assertStatus(422)->assertJsonValidationErrors('priority_type_id');
+        $this->registerQueue(['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Claim', 'priority_type_id' => $priority->id])->assertStatus(422)->assertJsonValidationErrors('priority_type_id');
     }
 
     public function test_priority_requires_staff_verification_and_is_audited(): void
     {
         [$branch, $service] = $this->branchWithServices();
-        $registration = $this->postJson('/api/v1/queues/online', ['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Lansia']);
+        $registration = $this->registerQueue(['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Lansia']);
         $queue = Queue::firstOrFail();
         $priority = PriorityType::where('branch_id', $branch->id)->where('priority_code', 'PRIORITY')->firstOrFail();
         $staff = $this->staff($branch->id);
@@ -99,7 +99,7 @@ class QueueManagementTest extends TestCase
     public function test_queue_transfer_assigns_a_new_number_in_the_target_service(): void
     {
         [$branch, $source, $target] = $this->branchWithServices();
-        $registration = $this->postJson('/api/v1/queues/online', ['branch_id' => $branch->id, 'service_type_id' => $source->id, 'customer_name' => 'Dewi']);
+        $registration = $this->registerQueue(['branch_id' => $branch->id, 'service_type_id' => $source->id, 'customer_name' => 'Dewi']);
         $queue = Queue::firstOrFail();
         $staff = $this->staff($branch->id);
         $this->actingAs($staff, 'sanctum')->postJson('/api/v1/queues/'.$queue->id.'/transfer', ['target_service_type_id' => $target->id, 'reason' => 'Layanan teller'])->assertOk()->assertJsonPath('data.queue_number', 'TL-001')->assertJsonPath('data.status', Queue::WAITING);
@@ -108,7 +108,7 @@ class QueueManagementTest extends TestCase
     public function test_status_transition_is_validated_and_recorded(): void
     {
         [$branch, $service] = $this->branchWithServices();
-        $registration = $this->postJson('/api/v1/queues/online', ['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Status']);
+        $registration = $this->registerQueue(['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'Status']);
         $queue = Queue::firstOrFail();
         $staff = $this->staff($branch->id);
         foreach ([Queue::SERVING, Queue::ASSIGNED, Queue::CALLED, Queue::COMPLETED] as $invalid) {
@@ -123,7 +123,7 @@ class QueueManagementTest extends TestCase
     public function test_history_is_isolated_by_branch(): void
     {
         [$branch, $service] = $this->branchWithServices();
-        $this->postJson('/api/v1/queues/online', ['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'History']);
+        $this->registerQueue(['branch_id' => $branch->id, 'service_type_id' => $service->id, 'customer_name' => 'History']);
         $staff = $this->staff($branch->id, ['queues.view']);
         $this->actingAs($staff, 'sanctum')->getJson('/api/v1/queues/history')->assertOk()->assertJsonPath('meta.total', 1);
     }

@@ -30,13 +30,6 @@ class QueueController extends Controller
         return response()->json(['data' => ['queue' => new QueueResource($result['queue']), 'token' => $result['token']], 'message' => 'Nomor antrian walk-in berhasil dibuat.'], 201);
     }
 
-    public function online(QueueRegistrationRequest $request): JsonResponse
-    {
-        $result = $this->registerAndAssign($request->validated(), 'ONLINE', $request->user());
-
-        return response()->json(['data' => ['queue' => new QueueResource($result['queue']), 'token' => $result['token']], 'message' => 'Pendaftaran online berhasil dibuat.'], 201);
-    }
-
     public function track(string $token): QueueTrackingResource
     {
         return new QueueTrackingResource($this->queues->track($token));

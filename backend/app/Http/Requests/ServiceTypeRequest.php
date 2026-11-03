@@ -14,6 +14,9 @@ class ServiceTypeRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        if ($this->input('unit_id') === '') {
+            $this->merge(['unit_id' => null]);
+        }
         if (is_string($this->input('queue_prefix'))) {
             $this->merge(['queue_prefix' => strtoupper(trim($this->input('queue_prefix')))]);
         }
@@ -28,6 +31,8 @@ class ServiceTypeRequest extends FormRequest
 
         return [
             'branch_id' => ['nullable', 'uuid'],
+            // Kosong = layanan berlaku untuk semua unit di cabang.
+            'unit_id' => ['nullable', 'uuid', Rule::exists('units', 'id')->where('branch_id', $branchId)->whereNull('deleted_at')],
             'service_name' => [$required, 'string', 'max:150'],
             'queue_prefix' => [$required, 'string', 'max:10', 'regex:/^[A-Z0-9]+$/', $unique('queue_prefix')],
             'priority_enabled' => ['sometimes', 'boolean'],
@@ -38,6 +43,7 @@ class ServiceTypeRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'unit_id.exists' => 'Unit tidak ditemukan pada cabang ini.',
             'queue_prefix.unique' => 'Prefix antrian sudah digunakan layanan lain pada cabang ini.',
             'queue_prefix.regex' => 'Prefix hanya boleh huruf kapital dan angka tanpa spasi atau tanda hubung.',
         ];

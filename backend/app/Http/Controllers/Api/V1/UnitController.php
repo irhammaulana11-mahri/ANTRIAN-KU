@@ -7,6 +7,7 @@ use App\Http\Requests\UnitRequest;
 use App\Http\Resources\UnitResource;
 use App\Models\Unit;
 use App\Services\BackendFoundationService;
+use App\Services\BranchServiceMode;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -48,7 +49,10 @@ class UnitController extends Controller
             ->orderBy('unit_name')
             ->get(['id', 'branch_id', 'unit_code', 'unit_name']);
 
-        return response()->json(['data' => $units]);
+        // Cabang yang dituju (Admin Cabang/Unit: cabangnya; Super Admin: dari parameter) menentukan apakah unit boleh dikosongkan.
+        $branchId = $user->branch_id ?? $request->input('branch_id');
+
+        return response()->json(['data' => $units, 'meta' => ['branch_serves_directly' => app(\App\Services\BranchServiceMode::class)->servesDirectly($branchId)]]);
     }
 
     public function store(UnitRequest $request)

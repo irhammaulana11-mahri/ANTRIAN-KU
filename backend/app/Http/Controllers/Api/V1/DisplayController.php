@@ -45,15 +45,18 @@ class DisplayController extends Controller
     public function snapshot(Request $request): JsonResponse
     {
         /** @var DisplayDevice $device */
-        $device = $request->user()->loadMissing('branch');
+        $device = $request->user()->loadMissing(['branch', 'unit']);
         $branchId = $device->branch_id;
+        $unitId = $device->unit_id; // perangkat berunit hanya menampilkan antrian unitnya
+        // Perangkat cabang: bila cabang melayani langsung, hanya antrian cabang (tanpa unit); bila tidak, ringkasan semua unit.
+        $branchOnly = $unitId === null && app(\App\Services\BranchServiceMode::class)->servesDirectly($branchId);
         $settings = DB::table('queue_settings')->where('branch_id', $branchId)->first();
 
         $calls = DB::table('queue_call_logs as l')
             ->join('queues as q', 'q.id', '=', 'l.queue_id')
             ->join('counters as c', 'c.id', '=', 'l.counter_id')
             ->join('service_types as s', 's.id', '=', 'q.service_type_id')
-            ->where('l.branch_id', $branchId)->where('l.called_at', '>=', now()->startOfDay())
+            ->where('l.branch_id', $branchId)->when($unitId, fn ($q) => $q->where('q.unit_id', $unitId))->when($branchOnly, fn ($q) => $q->whereNull('q.unit_id'))->where('l.called_at', '>=', now()->startOfDay())
             ->orderByDesc('l.called_at')->limit(40)
             ->get(['l.event_id', 'l.queue_id', 'l.call_type', 'l.called_at', 'q.queue_number', 'q.customer_name', 'q.status as queue_status', 's.service_name', 'c.counter_code', 'c.counter_name', 'c.counter_type'])
             ->map(fn ($row) => (array) $row + ['called_at_iso' => Carbon::parse($row->called_at)->toIso8601String()])
@@ -64,13 +67,15 @@ class DisplayController extends Controller
                 return $row;
             })->values();
 
-        $waiting = Queue::query()->join('service_types as s', 's.id', '=', 'queues.service_type_id')->where('queues.branch_id', $branchId)
+        $waiting = Queue::query()->join('service_types as s', 's.id', '=', 'queues.service_type_id')->where('queues.branch_id', $branchId)->when($unitId, fn ($q) => $q->where('queues.unit_id', $unitId))->when($branchOnly, fn ($q) => $q->whereNull('queues.unit_id'))
             ->whereIn('queues.status', [Queue::WAITING, Queue::ASSIGNED])->whereDate('queues.queue_date', now()->toDateString())
             ->groupBy('s.service_name')->orderBy('s.service_name')->selectRaw('s.service_name, count(*) as total')->get();
 
         return response()->json(['data' => [
             'server_time' => now()->toIso8601String(),
             'branch' => ['id' => $branchId, 'branch_name' => $device->branch?->branch_name],
+            'unit' => $device->unit_id ? ['id' => $device->unit_id, 'unit_name' => $device->unit?->unit_name] : null,
+            'branch_only' => $branchOnly,
             'settings' => [
                 'announcement' => $settings->display_announcement ?? null,
                 'voice_rate' => (float) ($settings->voice_rate ?? 1),
@@ -96,6 +101,7 @@ class DisplayController extends Controller
             'expires_at' => $expiresAt->toIso8601String(),
             'device' => ['id' => $device->id, 'device_name' => $device->device_name, 'device_type' => $device->device_type],
             'branch' => ['id' => $device->branch_id, 'branch_name' => $device->branch?->branch_name],
+            'unit' => $device->unit_id ? ['id' => $device->unit_id, 'unit_name' => $device->unit?->unit_name] : null,
         ], 'message' => 'Perangkat display aktif.']);
     }
 }

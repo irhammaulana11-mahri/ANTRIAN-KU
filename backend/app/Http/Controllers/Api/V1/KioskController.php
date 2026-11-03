@@ -7,6 +7,7 @@ use App\Http\Requests\KioskQueueRequest;
 use App\Models\DisplayDevice;
 use App\Models\ServiceType;
 use App\Services\BranchAvailabilityService;
+use App\Services\BranchServiceMode;
 use App\Services\QueueDistributionEngine;
 use App\Services\QueueManagementService;
 use App\Services\WaitEstimator;
@@ -21,18 +22,24 @@ class KioskController extends Controller
         private readonly QueueDistributionEngine $distribution,
         private readonly BranchAvailabilityService $availability,
         private readonly WaitEstimator $estimator,
+        private readonly BranchServiceMode $mode,
     ) {}
 
     public function config(Request $request): JsonResponse
     {
         /** @var DisplayDevice $device */
-        $device = $request->user()->loadMissing('branch');
+        $device = $request->user()->loadMissing(['branch', 'unit']);
         $status = $this->availability->status($device->branch_id);
+        if ($device->unit_id === null && ! $this->mode->servesDirectly($device->branch_id)) {
+            $status['is_open'] = false;
+            $status['message'] = 'Cabang tidak membuka layanan langsung. Perangkat ini belum ditautkan ke unit.';
+        }
 
         return response()->json(['data' => [
             'server_time' => now()->toIso8601String(),
             'branch' => ['id' => $device->branch_id, 'branch_name' => $device->branch?->branch_name],
-            'services' => ServiceType::query()->where('branch_id', $device->branch_id)->where('is_active', true)->orderBy('service_name')->get(['id', 'service_name', 'queue_prefix']),
+            'unit' => $device->unit_id ? ['id' => $device->unit_id, 'unit_name' => $device->unit?->unit_name] : null,
+            'services' => ServiceType::query()->where('branch_id', $device->branch_id)->where('is_active', true)->when($device->unit_id, fn ($q) => $q->where(fn ($w) => $w->whereNull('unit_id')->orWhere('unit_id', $device->unit_id)))->orderBy('service_name')->get(['id', 'service_name', 'queue_prefix']),
             'availability' => ['is_open' => $status['is_open'], 'message' => $status['message'], 'opens_at' => $status['opens_at'], 'closes_at' => $status['closes_at'], 'waiting_count' => $status['waiting_count']],
         ]]);
     }
@@ -41,6 +48,10 @@ class KioskController extends Controller
     {
         /** @var DisplayDevice $device */
         $device = $request->user()->loadMissing('branch');
+        abort_if($device->unit_id === null && ! $this->mode->servesDirectly($device->branch_id), 422, 'Cabang tidak membuka layanan langsung. Perangkat ini belum ditautkan ke unit.');
+        $allowed = ServiceType::query()->whereKey($request->input('service_type_id'))->where('branch_id', $device->branch_id)->where('is_active', true)
+            ->when($device->unit_id, fn ($q) => $q->where(fn ($w) => $w->whereNull('unit_id')->orWhere('unit_id', $device->unit_id)))->exists();
+        abort_unless($allowed, 422, 'Layanan tidak tersedia di unit ini.');
         $data = $request->validated() + ['branch_id' => $device->branch_id, 'unit_id' => $device->unit_id];
 
         $result = $this->queues->register($data, 'WALK_IN', null);
